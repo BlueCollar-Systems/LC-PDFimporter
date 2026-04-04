@@ -21,6 +21,8 @@ class DxfExportOptions:
     group_by_page: bool = True
     prefer_source_layers: bool = True
     attach_metadata: bool = True
+    dxf_version: str = "R2018"
+    map_dashes: bool = True
 
 
 @dataclass
@@ -34,7 +36,7 @@ class DxfExportResult:
 def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                   options: Optional[DxfExportOptions] = None) -> DxfExportResult:
     opts = options or DxfExportOptions()
-    doc = ezdxf.new("R2018")
+    doc = ezdxf.new(_normalize_dxf_version(opts.dxf_version))
     doc.units = MM
     msp = doc.modelspace()
 
@@ -51,9 +53,10 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
             _apply_color(attribs, primitive.stroke_color)
             _apply_lineweight(attribs, primitive.line_width)
 
-            ltype = _linetype_from_dash(doc, primitive.dash_pattern, dash_cache)
-            if ltype:
-                attribs["linetype"] = ltype
+            if opts.map_dashes:
+                ltype = _linetype_from_dash(doc, primitive.dash_pattern, dash_cache)
+                if ltype:
+                    attribs["linetype"] = ltype
 
             if primitive.type == "line" and primitive.points and len(primitive.points) == 2:
                 msp.add_line(primitive.points[0], primitive.points[1], dxfattribs=attribs)
@@ -141,6 +144,12 @@ def _layer_name(page_number: int, source_layer: Optional[str], stroke_color,
     elif stroke_color is not None:
         parts.append(_color_key(stroke_color))
     return "_".join(parts) if parts else "PDF_IMPORT"
+
+
+def _normalize_dxf_version(raw: str) -> str:
+    allowed = {"R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018"}
+    normalized = (raw or "R2018").strip().upper()
+    return normalized if normalized in allowed else "R2018"
 
 
 def _sanitize_layer(name: str) -> str:

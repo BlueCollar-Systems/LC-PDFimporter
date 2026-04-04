@@ -50,6 +50,45 @@ def _norm_color(col) -> Tuple[float, float, float]:
         return (0.0, 0.0, 0.0)
 
 
+def _parse_dashes(raw) -> list | None:
+    """Parse PyMuPDF dash patterns into a numeric list.
+
+    PyMuPDF returns dashes as strings like ``'[ 6 6 ] 0'`` (array + phase)
+    or as actual lists/tuples.  Returns ``None`` for solid lines.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s or s.startswith("[]") or s == "() 0":
+            return None
+        # Extract numbers between brackets: "[ 6 6 ] 0" -> [6.0, 6.0]
+        bracket = s.find("[")
+        bracket_end = s.find("]")
+        if bracket >= 0 and bracket_end > bracket:
+            inner = s[bracket + 1:bracket_end].strip()
+            if not inner:
+                return None
+            try:
+                nums = [float(x) for x in inner.split()]
+                return nums if nums else None
+            except ValueError:
+                return None
+        return None
+    if isinstance(raw, (list, tuple)):
+        if not raw:
+            return None
+        # Could be ([6,6], 0) tuple or flat [6,6]
+        if len(raw) == 2 and isinstance(raw[0], (list, tuple)):
+            return list(raw[0]) if raw[0] else None
+        try:
+            nums = [float(x) for x in raw]
+            return nums if nums else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def extract_page(page, page_num: int, scale: float = 1.0,
                  flip_y: bool = True) -> PageData:
     """Extract normalized primitives from a PyMuPDF page."""
@@ -68,7 +107,7 @@ def extract_page(page, page_num: int, scale: float = 1.0,
         stroke = _norm_color(path_group.get("color") or path_group.get("stroke"))
         fill = _norm_color(path_group.get("fill"))
         width = path_group.get("width")
-        dashes = path_group.get("dashes")
+        dashes = _parse_dashes(path_group.get("dashes"))
         close_path = path_group.get("closePath", False)
         layer_name = path_group.get("oc") or path_group.get("layer")
 
@@ -204,35 +243,61 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
             spans = line.get("spans", [])
             if not spans:
                 continue
-            text = "".join(s.get("text", "") for s in spans).strip()
-            if not text:
-                continue
-
-            origin = spans[0].get("origin")
-            if origin:
-                x, y = float(origin[0]), float(origin[1])
-            else:
-                bb = line.get("bbox", (0, 0, 0, 0))
-                x, y = float(bb[0]), float(bb[1])
-
-            px, py = _to_mm(x, y, page_h, flip_y, scale)
-            size = max(float(spans[0].get("size", 3)), 1.0) * MM_PER_PT * scale
-            font = str(spans[0].get("font", ""))
-
             text_dir = line.get("dir", (1.0, 0.0))
             dx = float(text_dir[0]) if text_dir else 1.0
             dy = float(text_dir[1]) if text_dir else 0.0
             angle = -math.degrees(math.atan2(dy, dx))
 
-            normalized = text.upper().replace("  ", " ").strip()
-            generic_tags = _classify_generic(text)
+            # Important: keep each PDF span as its own text item.
+            # Some CAD PDFs store a visual "line" as multiple positioned spans;
+            # collapsing them into one string at the first-span origin causes
+            # alignment drift and label overlap in DXF viewers.
+            for span in spans:
+                text = str(span.get("text", "")).strip()
+                if not text:
+                    continue
 
-            items.append(NormalizedText(
-                id=next_id(), text=text, normalized=normalized,
-                insertion=(px, py), font_size=size,
-                rotation=angle, font_name=font,
-                page_number=page_num, generic_tags=generic_tags
-            ))
+                origin = span.get("origin")
+                if origin and len(origin) >= 2:
+                    x, y = float(origin[0]), float(origin[1])
+                else:
+                    bb = span.get("bbox") or line.get("bbox", (0, 0, 0, 0))
+                    # Fallback: use lower-left-ish point from bbox.
+                    x, y = float(bb[0]), float(bb[3] if len(bb) >= 4 else bb[1])
+
+                px, py = _to_mm(x, y, page_h, flip_y, scale)
+                size = max(float(span.get("size", 3)), 1.0) * MM_PER_PT * scale
+                font = str(span.get("font", ""))
+
+                bbox_mm = None
+                sb = span.get("bbox")
+                if sb and len(sb) >= 4:
+                    x0, y0, x1, y1 = map(float, sb[:4])
+                    if flip_y:
+                        by0 = (page_h - max(y0, y1)) * MM_PER_PT * scale
+                        by1 = (page_h - min(y0, y1)) * MM_PER_PT * scale
+                    else:
+                        by0 = min(y0, y1) * MM_PER_PT * scale
+                        by1 = max(y0, y1) * MM_PER_PT * scale
+                    bx0 = min(x0, x1) * MM_PER_PT * scale
+                    bx1 = max(x0, x1) * MM_PER_PT * scale
+                    bbox_mm = (bx0, by0, bx1, by1)
+
+                normalized = text.upper().replace("  ", " ").strip()
+                generic_tags = _classify_generic(text)
+
+                items.append(NormalizedText(
+                    id=next_id(),
+                    text=text,
+                    normalized=normalized,
+                    insertion=(px, py),
+                    bbox=bbox_mm,
+                    font_size=size,
+                    rotation=angle,
+                    font_name=font,
+                    page_number=page_num,
+                    generic_tags=generic_tags,
+                ))
     return items
 
 

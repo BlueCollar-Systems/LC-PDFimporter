@@ -120,3 +120,104 @@ def detect(drawings: List[dict]) -> Set[int]:
                     hatch_indices.add(l["idx"])
 
     return hatch_indices
+
+
+# ── Post-extraction hatch detection on Primitive objects ────────────
+
+def tag_hatch_primitives(primitives) -> Set[int]:
+    """Detect hatch patterns among extracted Primitive objects.
+
+    Works on the already-extracted primitives (post-extraction) rather
+    than raw PyMuPDF drawings.  Uses the same algorithm as :func:`detect`
+    but operates on :class:`Primitive` ``points`` instead of raw path items.
+
+    Parameters
+    ----------
+    primitives:
+        List of :class:`Primitive` objects from a :class:`PageData`.
+
+    Returns
+    -------
+    set[int]
+        Set of Primitive ``.id`` values that form hatch patterns.
+    """
+    if not primitives or len(primitives) < MIN_HATCH_LINES:
+        return set()
+
+    # Step 1: filter to simple line primitives (type=="line", exactly 2 points)
+    lines = []
+    for p in primitives:
+        if p.type != "line" or not p.points or len(p.points) != 2:
+            continue
+        x0, y0 = p.points[0]
+        x1, y1 = p.points[1]
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length < 0.5:
+            continue
+        angle = math.degrees(math.atan2(dy, dx))
+        if angle < 0:
+            angle += 180.0
+        mx = (x0 + x1) / 2.0
+        my = (y0 + y1) / 2.0
+        lines.append({
+            "pid": p.id,
+            "angle": angle,
+            "len": length,
+            "mx": mx,
+            "my": my,
+        })
+
+    if len(lines) < MIN_HATCH_LINES:
+        return set()
+
+    # Step 2: group by angle (within tolerance)
+    hatch_ids: Set[int] = set()
+    used = [False] * len(lines)
+
+    for i, line in enumerate(lines):
+        if used[i]:
+            continue
+        group = [line]
+        used[i] = True
+        for j, other in enumerate(lines):
+            if j <= i or used[j]:
+                continue
+            if _angle_diff(line["angle"], other["angle"]) < ANGLE_TOL_DEG:
+                group.append(other)
+                used[j] = True
+        if len(group) < MIN_HATCH_LINES:
+            continue
+
+        # Step 3: check spacing regularity along perpendicular axis
+        ref_rad = math.radians(group[0]["angle"])
+        perp_x = -math.sin(ref_rad)
+        perp_y = math.cos(ref_rad)
+        projections = sorted(
+            [{"proj": l["mx"] * perp_x + l["my"] * perp_y, "line": l}
+             for l in group],
+            key=lambda p: p["proj"],
+        )
+        spacings = []
+        for k in range(1, len(projections)):
+            spacings.append(
+                abs(projections[k]["proj"] - projections[k - 1]["proj"])
+            )
+        if not spacings:
+            continue
+        mean_sp = sum(spacings) / len(spacings)
+        if mean_sp < 0.3:
+            continue
+        variance = sum((s - mean_sp) ** 2 for s in spacings) / len(spacings)
+        std_dev = math.sqrt(variance)
+        if mean_sp > 0 and (std_dev / mean_sp) < SPACING_REGULARITY:
+            # Step 4: check length consistency
+            lengths = [l["len"] for l in group]
+            mean_len = sum(lengths) / len(lengths)
+            len_var = sum((v - mean_len) ** 2 for v in lengths) / len(lengths)
+            len_cv = math.sqrt(len_var) / mean_len if mean_len > 0 else 1.0
+            if len_cv < LENGTH_CV_MAX:
+                for l in group:
+                    hatch_ids.add(l["pid"])
+
+    return hatch_ids

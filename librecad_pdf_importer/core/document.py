@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 from pathlib import Path
+import tempfile
 from typing import Iterable, List, Optional
 
 import fitz
@@ -76,6 +77,9 @@ class ExtractionOptions:
     flip_y: bool = True
     import_text: bool = True
     import_images: bool = True
+    import_mode: str = "auto"
+    raster_fallback: bool = True
+    raster_dpi: int = 200
     detect_arcs: bool = True
     arc_fit_tol_mm: float = 0.20
     min_arc_span_deg: float = 8.0
@@ -86,7 +90,7 @@ class ExtractionOptions:
 
 def parse_pages_spec(spec: Optional[Iterable[int] | str], page_count: int) -> List[int]:
     if spec is None:
-        return [1]
+        return list(range(1, page_count + 1))
     if isinstance(spec, str):
         s = spec.strip().lower()
         if not s or s in {"1", "first"}:
@@ -124,9 +128,12 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
     pdf_path = str(Path(pdf_path).expanduser().resolve())
 
     image_dir = Path(opts.image_dir).expanduser().resolve() if opts.image_dir else None
+    if opts.import_images and image_dir is None:
+        image_dir = Path(tempfile.mkdtemp(prefix="bc_lc_pdf_images_"))
     if image_dir is not None:
         image_dir.mkdir(parents=True, exist_ok=True)
 
+    mode = _normalize_import_mode(opts.import_mode)
     extracted: list[ExtractedPage] = []
 
     with fitz.open(pdf_path) as doc:
@@ -134,25 +141,51 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
         for page_number in pages:
             page = doc.load_page(page_number - 1)
             page_data = extract_page(page, page_number, scale=opts.scale, flip_y=opts.flip_y)
-            if opts.min_segment_mm > 0:
-                _prune_micro_segments(page_data, opts.min_segment_mm)
-            if not opts.import_text:
+
+            include_vectors = mode in {"auto", "vectors", "hybrid"}
+            if include_vectors:
+                if opts.min_segment_mm > 0:
+                    _prune_micro_segments(page_data, opts.min_segment_mm)
+                if not opts.import_text:
+                    page_data.text_items = []
+                elif opts.max_text_items_per_page is not None:
+                    cap = int(max(0, opts.max_text_items_per_page))
+                    if len(page_data.text_items) > cap:
+                        page_data.text_items = page_data.text_items[:cap]
+                if opts.detect_arcs:
+                    _promote_arcs(page_data, opts.arc_fit_tol_mm, opts.min_arc_span_deg)
+            else:
+                page_data.primitives = []
                 page_data.text_items = []
-            elif opts.max_text_items_per_page is not None:
-                cap = int(max(0, opts.max_text_items_per_page))
-                if len(page_data.text_items) > cap:
-                    page_data.text_items = page_data.text_items[:cap]
-            if opts.detect_arcs:
-                _promote_arcs(page_data, opts.arc_fit_tol_mm, opts.min_arc_span_deg)
 
             profile = profile_page(page_data)
             images = []
             if opts.import_images:
-                images = _extract_images(doc, page, page_number, opts, image_dir)
+                if mode in {"raster", "hybrid"}:
+                    rendered = _render_page_raster(page, page_number, opts, image_dir)
+                    if rendered is not None:
+                        images.append(rendered)
+                elif mode == "auto":
+                    images = _extract_images(doc, page, page_number, opts, image_dir)
+                    if opts.raster_fallback and not page_data.primitives and not images:
+                        rendered = _render_page_raster(page, page_number, opts, image_dir)
+                        if rendered is not None:
+                            images.append(rendered)
 
             extracted.append(ExtractedPage(page_data=page_data, profile=profile, images=images))
 
     return DocumentExtraction(pdf_path=pdf_path, pages=extracted)
+
+
+def _normalize_import_mode(raw: str | None) -> str:
+    mode = (raw or "auto").strip().lower()
+    if mode in {"vectors", "vector", "vector_only", "vectors_only"}:
+        return "vectors"
+    if mode in {"raster", "raster_only", "image", "images"}:
+        return "raster"
+    if mode in {"hybrid", "raster_vector", "raster+vectors", "raster_vectors"}:
+        return "hybrid"
+    return "auto"
 
 
 def _promote_arcs(page_data: PageData, arc_fit_tol_mm: float, min_arc_span_deg: float) -> None:
@@ -285,3 +318,32 @@ def _extract_images(doc: fitz.Document, page: fitz.Page, page_number: int,
             )
 
     return placements
+
+
+def _render_page_raster(page: fitz.Page, page_number: int, options: ExtractionOptions,
+                        image_dir: Optional[Path]) -> Optional[ImagePlacement]:
+    if image_dir is None:
+        return None
+
+    dpi = int(max(36, options.raster_dpi or 200))
+    zoom = dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
+
+    try:
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        img_path = image_dir / f"page_{page_number:03d}_raster_{dpi}dpi.png"
+        pix.save(str(img_path))
+    except (RuntimeError, OSError, ValueError, TypeError):
+        return None
+
+    width_mm = float(page.rect.width) * MM_PER_PT * options.scale
+    height_mm = float(page.rect.height) * MM_PER_PT * options.scale
+    return ImagePlacement(
+        page_number=page_number,
+        x_mm=0.0,
+        y_mm=0.0,
+        width_mm=width_mm,
+        height_mm=height_mm,
+        path=str(img_path),
+        xref=-1,
+    )

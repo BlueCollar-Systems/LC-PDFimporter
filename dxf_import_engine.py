@@ -23,6 +23,9 @@ from pdfcadcore.primitives import PageData, RecognitionConfig
 from pdfcadcore.primitive_extractor import extract_page
 from pdfcadcore.import_config import ImportConfig
 from pdfcadcore import recognition, reset_ids
+from pdfcadcore.auto_mode import classify_page_content
+from pdfcadcore.hatch_detector import tag_hatch_primitives
+from pdfcadcore.geometry_cleanup import cleanup_primitives
 
 from dxf_builder import build_dxf
 from dxf_text_builder import reset_text_styles
@@ -97,19 +100,62 @@ def convert(
     _log(f"PDF opened: {total_pages} page(s), converting {len(page_indices)}")
 
     # ------------------------------------------------------------------
-    # 3. Extract pages via pdfcadcore
+    # 3. Extract pages via pdfcadcore (with auto-mode, cleanup, hatch)
     # ------------------------------------------------------------------
     pages_data: List[PageData] = []
 
     for idx, page_num in enumerate(page_indices, 1):
         _log(f"Extracting page {page_num + 1}/{total_pages}...")
         fitz_page = pdf_doc.load_page(page_num)
+
+        # 3a. Auto-mode classification (before extraction)
+        if config.import_mode == "auto":
+            raw_drawings = fitz_page.get_drawings()
+            text_blocks = fitz_page.get_text("blocks") or []
+            text_words = fitz_page.get_text("words") or []
+            classification = classify_page_content(
+                raw_drawings,
+                text_blocks_count=len(text_blocks),
+                text_words_count=len(text_words),
+            )
+            if classification["type"] in ("glyph_flood", "fill_art"):
+                _log(f"Auto-mode: {classification['reason']} — "
+                     f"skipping vector import for page {page_num + 1}")
+                continue
+
+        # 3b. Extract primitives
         page_data = extract_page(
             fitz_page,
             page_num=page_num + 1,   # 1-based for display / layer names
             scale=config.user_scale,
             flip_y=config.flip_y,
         )
+
+        # 3c. Geometry cleanup (remove micro-segments)
+        if config.cleanup_level != "conservative" or config.min_seg_len > 0:
+            cleanup_stats = cleanup_primitives(
+                page_data.primitives,
+                cleanup_level=config.cleanup_level,
+            )
+            if config.verbose and cleanup_stats.get("removed_micro", 0) > 0:
+                _log(f"Cleanup: removed "
+                     f"{cleanup_stats['removed_micro']} micro-segments "
+                     f"on page {page_num + 1}")
+
+        # 3d. Hatch detection (post-extraction, on primitives)
+        if config.hatch_mode != "import":
+            hatch_ids = tag_hatch_primitives(page_data.primitives)
+            if hatch_ids:
+                if config.hatch_mode == "skip":
+                    page_data.primitives = [
+                        p for p in page_data.primitives
+                        if p.id not in hatch_ids
+                    ]
+                elif config.hatch_mode == "group":
+                    for p in page_data.primitives:
+                        if p.id in hatch_ids:
+                            p.generic_tags.append("hatch_line")
+
         pages_data.append(page_data)
 
     pdf_doc.close()

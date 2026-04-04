@@ -8,7 +8,7 @@ from pathlib import Path
 import ezdxf
 import fitz
 
-from librecad_pdf_importer.exporters.dxf_exporter import export_to_dxf
+from librecad_pdf_importer.exporters.dxf_exporter import DxfExportOptions, export_to_dxf
 from librecad_pdf_importer.importer import run_import
 
 
@@ -43,6 +43,10 @@ class TestDxfPipeline(unittest.TestCase):
         pix.clear_with(0x3366CC)
         page.insert_image(fitz.Rect(360, 60, 420, 120), stream=pix.tobytes("png"))
 
+        # Second page to validate default page-selection behavior.
+        page2 = doc.new_page(width=300, height=200)
+        page2.draw_line((25, 25), (220, 25), color=(1, 0, 0), width=1.0)
+
         doc.save(str(out_path))
 
     def test_pdf_to_dxf_export(self) -> None:
@@ -59,6 +63,33 @@ class TestDxfPipeline(unittest.TestCase):
 
         types = {entity.dxftype() for entity in entities}
         self.assertTrue({"LINE", "LWPOLYLINE", "ARC", "CIRCLE"}.intersection(types))
+
+    def test_default_page_selection_imports_all_pages(self) -> None:
+        run = run_import(str(self.pdf_path), preset="general")
+        self.assertEqual(len(run.extraction.pages), 2)
+
+    def test_raster_only_mode_outputs_image_entity(self) -> None:
+        run = run_import(str(self.pdf_path), preset="raster_only", overrides={"pages": "1"})
+        export = export_to_dxf(
+            run.extraction,
+            str(self.dxf_path),
+            DxfExportOptions(include_text=False, include_images=True),
+        )
+
+        dxf = ezdxf.readfile(export.output_path)
+        types = {entity.dxftype() for entity in dxf.modelspace()}
+        self.assertIn("IMAGE", types)
+
+    def test_dxf_version_override(self) -> None:
+        run = run_import(str(self.pdf_path), preset="technical", overrides={"pages": "1"})
+        export = export_to_dxf(
+            run.extraction,
+            str(self.dxf_path),
+            DxfExportOptions(dxf_version="R12", include_images=False),
+        )
+        self.assertTrue(Path(export.output_path).is_file())
+        dxf = ezdxf.readfile(export.output_path)
+        self.assertEqual(dxf.dxfversion, "AC1009")
 
 
 if __name__ == "__main__":

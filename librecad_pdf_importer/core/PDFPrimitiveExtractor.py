@@ -212,35 +212,50 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
             spans = line.get("spans", [])
             if not spans:
                 continue
-            text = "".join(s.get("text", "") for s in spans).strip()
-            if not text:
-                continue
-
-            origin = spans[0].get("origin")
-            if origin:
-                x, y = float(origin[0]), float(origin[1])
-            else:
-                bb = line.get("bbox", (0, 0, 0, 0))
-                x, y = float(bb[0]), float(bb[1])
-
-            px, py = _to_mm(x, y, page_h, flip_y, scale)
-            size = max(float(spans[0].get("size", 3)), 1.0) * MM_PER_PT * scale
-            font = str(spans[0].get("font", ""))
-
             text_dir = line.get("dir", (1.0, 0.0))
             dx = float(text_dir[0]) if text_dir else 1.0
             dy = float(text_dir[1]) if text_dir else 0.0
             angle = -math.degrees(math.atan2(dy, dx))
 
-            normalized = text.upper().replace("  ", " ").strip()
-            generic_tags = _classify_generic(text)
+            for span in spans:
+                text = str(span.get("text", "")).strip()
+                if not text:
+                    continue
 
-            items.append(NormalizedText(
-                id=next_id(), text=text, normalized=normalized,
-                insertion=(px, py), font_size=size,
-                rotation=angle, font_name=font,
-                page_number=page_num, generic_tags=generic_tags
-            ))
+                origin = span.get("origin")
+                if origin and len(origin) >= 2:
+                    x, y = float(origin[0]), float(origin[1])
+                else:
+                    bb = span.get("bbox") or line.get("bbox", (0, 0, 0, 0))
+                    x, y = float(bb[0]), float(bb[3] if len(bb) >= 4 else bb[1])
+
+                px, py = _to_mm(x, y, page_h, flip_y, scale)
+                size = max(float(span.get("size", 3)), 1.0) * MM_PER_PT * scale
+                font = str(span.get("font", ""))
+
+                bbox_mm = None
+                sb = span.get("bbox")
+                if sb and len(sb) >= 4:
+                    x0, y0, x1, y1 = map(float, sb[:4])
+                    if flip_y:
+                        by0 = (page_h - max(y0, y1)) * MM_PER_PT * scale
+                        by1 = (page_h - min(y0, y1)) * MM_PER_PT * scale
+                    else:
+                        by0 = min(y0, y1) * MM_PER_PT * scale
+                        by1 = max(y0, y1) * MM_PER_PT * scale
+                    bx0 = min(x0, x1) * MM_PER_PT * scale
+                    bx1 = max(x0, x1) * MM_PER_PT * scale
+                    bbox_mm = (bx0, by0, bx1, by1)
+
+                normalized = text.upper().replace("  ", " ").strip()
+                generic_tags = _classify_generic(text)
+
+                items.append(NormalizedText(
+                    id=next_id(), text=text, normalized=normalized,
+                    insertion=(px, py), bbox=bbox_mm, font_size=size,
+                    rotation=angle, font_name=font,
+                    page_number=page_num, generic_tags=generic_tags
+                ))
     return items
 
 

@@ -10,8 +10,10 @@ DraftSight, QCAD, and any DXF-compatible CAD software.
 - Extracts lines, polylines, arcs, circles, rectangles, and closed loops
 - Preserves stroke colors, line widths, and dash patterns
 - Imports text with font size and rotation
+- Supports text modes (`labels`, `geometry`, `none`) and strict-text fidelity
+- Supports raster-only and hybrid raster+vector import modes
 - Organizes geometry into DXF layers (per-page and per-OCG)
-- Multiple import presets: Fast, General, Technical, Shop Drawing, Max Fidelity
+- Multiple import presets: Fast, General, Technical, Shop Drawing, Raster+Vectors, Raster Only, Max Fidelity
 - Outputs DXF versions from R12 through R2018
 - CLI and GUI interfaces
 - Built on pdfcadcore shared extraction engine
@@ -61,7 +63,17 @@ python pdf2dxf.py input.pdf [output.dxf] [options]
 
 Options:
   --pages 1,2,3          Pages to convert (default: all)
-  --preset PRESET        fast | general | technical | shop | full | max (default: shop)
+  --preset PRESET        fast | general | technical | shop | full | raster_vector | raster_only | max (default: shop)
+  --mode MODE            auto | vectors | raster | hybrid
+  --text-mode MODE       labels | geometry | none
+  --strict-text-fidelity / --no-strict-text-fidelity
+  --hatch-mode MODE      import | group | skip
+  --arc-mode MODE        auto | preserve | rebuild | polyline
+  --cleanup-level LVL    conservative | balanced | aggressive
+  --lineweight-mode MODE ignore | preserve | group | map_to_layers
+  --grouping-mode MODE   single | per_page | per_layer | per_color | nested_page_layer | nested_page_lineweight
+  --raster-dpi DPI       Raster rendering DPI for raster/hybrid modes
+  --no-raster-fallback   Disable automatic raster fallback when vectors are absent
   --scale 1.0            Scale factor
   --no-text              Skip text import
   --no-arcs              Skip arc detection
@@ -86,6 +98,22 @@ python gui.py
 The GUI provides file pickers, preset selection, page range input, option
 checkboxes, a progress bar, and a status log.
 
+## Batch Import
+
+Convert an entire directory tree of PDFs to DXF:
+
+```
+python -m librecad_pdf_importer.batch_cli "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --preset technical --pages all --json batch_report.json
+```
+
+## QA Smoke Harness
+
+Run a quick automated smoke-test pass on one PDF or a folder:
+
+```
+python -m librecad_pdf_importer.qa_smoke "C:\path\to\pdfs" --preset technical --pages 1 --min-entities 1 --json qa_smoke.json
+```
+
 ## Import Presets
 
 | Preset     | Best For                          | Speed   |
@@ -94,6 +122,8 @@ checkboxes, a progress bar, and a status log.
 | general    | Most general-purpose PDFs         | Fast    |
 | technical  | Engineering / technical drawings  | Medium  |
 | shop       | Fabrication / shop drawings       | Medium  |
+| raster_vector | Raster background + vector overlay | Medium |
+| raster_only | Raster rendering only (no vectors) | Fast |
 | full       | Same as shop                      | Medium  |
 | max        | Highest accuracy, archival        | Slowest |
 

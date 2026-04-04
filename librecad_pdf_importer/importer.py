@@ -18,6 +18,21 @@ def _preset_config(name: str) -> ImportConfig:
     key = (name or "general").strip().lower()
     if key in {"fast", "preview"}:
         return ImportConfig.fast()
+    if key in {"raster_vector", "raster+vectors", "hybrid"}:
+        cfg = ImportConfig.full()
+        cfg.import_mode = "hybrid"
+        cfg.ignore_images = False
+        cfg.raster_fallback = True
+        cfg.text_mode = "labels"
+        return cfg
+    if key in {"raster_only", "raster"}:
+        cfg = ImportConfig.fast()
+        cfg.import_mode = "raster"
+        cfg.ignore_images = False
+        cfg.import_text = False
+        cfg.text_mode = "none"
+        cfg.detect_arcs = False
+        return cfg
     if key in {"max", "max_fidelity", "fidelity"}:
         return ImportConfig.max_fidelity()
     if key in {"shop", "shop_drawing", "full"}:
@@ -39,6 +54,10 @@ def _preset_runtime_tuning(name: str) -> Dict[str, Any]:
     key = (name or "general").strip().lower()
     if key in {"fast", "preview"}:
         return {"min_segment_mm": 0.40, "max_text_items_per_page": 0}
+    if key in {"raster_only", "raster"}:
+        return {"min_segment_mm": 0.50, "max_text_items_per_page": 0}
+    if key in {"raster_vector", "raster+vectors", "hybrid"}:
+        return {"min_segment_mm": 0.05, "max_text_items_per_page": 800}
     if key in {"technical", "tech"}:
         return {"min_segment_mm": 0.02, "max_text_items_per_page": 1500}
     if key in {"shop", "shop_drawing", "full"}:
@@ -64,6 +83,9 @@ def run_import(pdf_path: str, preset: str = "general",
         flip_y=cfg.flip_y,
         import_text=cfg.import_text and cfg.text_mode != "none",
         import_images=not cfg.ignore_images,
+        import_mode=cfg.import_mode,
+        raster_fallback=cfg.raster_fallback,
+        raster_dpi=cfg.raster_dpi,
         detect_arcs=cfg.detect_arcs,
         arc_fit_tol_mm=cfg.arc_fit_tol_mm,
         min_segment_mm=float(tuning.get("min_segment_mm", 0.0) or 0.0),

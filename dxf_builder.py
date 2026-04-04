@@ -177,8 +177,42 @@ def _add_line(msp, prim: Primitive, attribs: dict) -> int:
     return 1
 
 
+def _has_curvature(points, threshold=0.1) -> bool:
+    """Check if a polyline has significant curvature (not just straight segments).
+
+    Returns True if at least 3 consecutive-segment angle changes exceed
+    *threshold* (~6 degrees), indicating the polyline likely originated
+    from Bezier linearisation rather than straight-line geometry.
+    """
+    if len(points) < 4:
+        return False
+    angle_changes = 0
+    for i in range(1, len(points) - 1):
+        dx1 = points[i][0] - points[i - 1][0]
+        dy1 = points[i][1] - points[i - 1][1]
+        dx2 = points[i + 1][0] - points[i][0]
+        dy2 = points[i + 1][1] - points[i][1]
+        len1 = math.hypot(dx1, dy1)
+        len2 = math.hypot(dx2, dy2)
+        if len1 > 0.01 and len2 > 0.01:
+            cross = dx1 * dy2 - dy1 * dx2
+            sin_angle = cross / (len1 * len2)
+            if abs(sin_angle) > threshold:  # >~6 degrees
+                angle_changes += 1
+    return angle_changes >= 3  # At least 3 direction changes = curved
+
+
 def _add_polyline(msp, prim: Primitive, attribs: dict) -> int:
-    """Add an LWPOLYLINE. Returns 1."""
+    """Add an LWPOLYLINE, or a SPLINE for curved polylines. Returns 1."""
+    # For open, dense polylines with curvature, use SPLINE for better
+    # Bezier fidelity in downstream CAD programs.
+    if not prim.closed and len(prim.points) >= 8 and _has_curvature(prim.points):
+        try:
+            points_3d = [(x, y, 0) for x, y in prim.points]
+            msp.add_spline(points_3d, dxfattribs=attribs)
+            return 1
+        except Exception:
+            pass  # Fall through to LWPOLYLINE
     msp.add_lwpolyline(
         prim.points,
         close=prim.closed,
@@ -289,9 +323,19 @@ def build_dxf(
         # Track OCG layers already created for this page
         ocg_created: set[str] = set()
 
+        # Create a hatch layer if hatch_mode is "group"
+        hatch_layer = _safe_layer_name(f"Hatch_Page_{page.page_number}")
+        hatch_layer_created = False
+
         for prim in page.primitives:
             # Determine layer name
-            if prim.layer_name:
+            if "hatch_line" in prim.generic_tags:
+                # Place hatch entities on a dedicated Hatch layer
+                if not hatch_layer_created:
+                    _ensure_layer(doc, hatch_layer)
+                    hatch_layer_created = True
+                layer = hatch_layer
+            elif prim.layer_name:
                 layer = _safe_layer_name(prim.layer_name)
                 if layer not in ocg_created:
                     _ensure_layer(doc, layer)
@@ -310,8 +354,8 @@ def build_dxf(
             writer = _WRITERS.get(prim.type, _add_polyline)
             entity_count += writer(msp, prim, attribs)
 
-        # Text entities
-        if config.import_text:
+        # Text entities — add for "labels" and "geometry" modes; skip for "none"
+        if config.import_text and config.text_mode != "none":
             for ti in page.text_items:
                 layer = page_layer
                 build_text(ti, msp, layer, config, is_r12)

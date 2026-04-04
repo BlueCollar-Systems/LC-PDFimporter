@@ -46,7 +46,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("input", help="Input PDF file path")
+    p.add_argument("input", nargs="?", default=None, help="Input PDF file path")
     p.add_argument("output", nargs="?", default=None,
                    help="Output DXF file path (default: <input>.dxf)")
 
@@ -102,7 +102,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"GUI unavailable: {exc}", file=sys.stderr)
             return 1
 
-    # Validate input
+    # Validate input (CLI mode only)
+    if not args.input:
+        print("Error: input file path is required unless --gui is used.", file=sys.stderr)
+        return 1
     if not os.path.isfile(args.input):
         print(f"Error: input file not found: {args.input}", file=sys.stderr)
         return 1
