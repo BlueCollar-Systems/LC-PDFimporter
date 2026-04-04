@@ -1,0 +1,164 @@
+# -*- coding: utf-8 -*-
+# dxf_import_engine.py -- Pipeline orchestrator: PDF -> pdfcadcore -> DXF
+# Copyright (c) 2024-2026 BlueCollar Systems -- BUILT. NOT BOUGHT.
+# Licensed under the MIT License. See LICENSE for details.
+"""
+Top-level conversion pipeline.  Ties together PyMuPDF extraction,
+pdfcadcore recognition, and ezdxf DXF building.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from typing import Callable, Dict, List, Optional
+
+# Ensure project root is importable
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import ezdxf
+
+from pdfcadcore.primitives import PageData, RecognitionConfig
+from pdfcadcore.primitive_extractor import extract_page
+from pdfcadcore.import_config import ImportConfig
+from pdfcadcore import recognition, reset_ids
+
+from dxf_builder import build_dxf
+from dxf_text_builder import reset_text_styles
+
+
+def convert(
+    input_path: str,
+    output_path: str,
+    config: Optional[ImportConfig] = None,
+    dxf_version: str = "R2010",
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> Dict[str, int]:
+    """Convert a PDF file to DXF.
+
+    Parameters
+    ----------
+    input_path:
+        Path to the source PDF.
+    output_path:
+        Destination path for the DXF file.
+    config:
+        Import configuration.  Defaults to :meth:`ImportConfig.shop_drawing`.
+    dxf_version:
+        Target DXF version (``"R12"`` through ``"R2018"``).
+    progress_callback:
+        Optional callable receiving status strings during processing.
+
+    Returns
+    -------
+    dict
+        Statistics: ``pages``, ``entities``, ``text_items``.
+    """
+    if config is None:
+        config = ImportConfig.shop_drawing()
+
+    def _log(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+
+    # ------------------------------------------------------------------
+    # 1. Reset ID counter (keeps IDs predictable per conversion)
+    # ------------------------------------------------------------------
+    reset_ids()
+    reset_text_styles()
+
+    # ------------------------------------------------------------------
+    # 2. Open PDF with PyMuPDF
+    # ------------------------------------------------------------------
+    _log("Opening PDF...")
+    try:
+        import fitz  # PyMuPDF
+    except ImportError as exc:
+        raise ImportError(
+            "PyMuPDF (fitz) is required.  Install with:  pip install PyMuPDF"
+        ) from exc
+
+    pdf_doc = fitz.open(input_path)
+    total_pages = pdf_doc.page_count
+
+    # Determine which pages to convert
+    if config.pages is not None:
+        page_indices = [p for p in config.pages if 0 <= p < total_pages]
+    else:
+        page_indices = list(range(total_pages))
+
+    if not page_indices:
+        pdf_doc.close()
+        raise ValueError(
+            f"No valid pages to convert (PDF has {total_pages} page(s))."
+        )
+
+    _log(f"PDF opened: {total_pages} page(s), converting {len(page_indices)}")
+
+    # ------------------------------------------------------------------
+    # 3. Extract pages via pdfcadcore
+    # ------------------------------------------------------------------
+    pages_data: List[PageData] = []
+
+    for idx, page_num in enumerate(page_indices, 1):
+        _log(f"Extracting page {page_num + 1}/{total_pages}...")
+        fitz_page = pdf_doc.load_page(page_num)
+        page_data = extract_page(
+            fitz_page,
+            page_num=page_num + 1,   # 1-based for display / layer names
+            scale=config.user_scale,
+            flip_y=config.flip_y,
+        )
+        pages_data.append(page_data)
+
+    pdf_doc.close()
+
+    # ------------------------------------------------------------------
+    # 4. Optional recognition pass
+    # ------------------------------------------------------------------
+    if config.detect_arcs or config.make_faces:
+        rec_config = RecognitionConfig()
+        for page_data in pages_data:
+            _log(f"Recognition on page {page_data.page_number}...")
+            recognition.run(page_data, mode="auto", config=rec_config)
+
+    # ------------------------------------------------------------------
+    # 5. Build DXF document
+    # ------------------------------------------------------------------
+    _log("Building DXF...")
+    doc, entity_count, text_count = build_dxf(
+        pages_data, config, dxf_version=dxf_version,
+    )
+
+    # ------------------------------------------------------------------
+    # 6. Save DXF
+    # ------------------------------------------------------------------
+    _log(f"Saving DXF to {output_path}...")
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    doc.saveas(output_path)
+
+    # ------------------------------------------------------------------
+    # 7. Optional validation
+    # ------------------------------------------------------------------
+    if config.verbose:
+        _log("Validating output...")
+        try:
+            test_doc = ezdxf.readfile(output_path)
+            auditor = test_doc.audit()
+            if auditor.has_errors:
+                _log(f"  Validation warnings: {len(auditor.errors)} issue(s)")
+            else:
+                _log("  Validation passed.")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"  Validation skipped: {exc}")
+
+    # ------------------------------------------------------------------
+    # 8. Return stats
+    # ------------------------------------------------------------------
+    _log("Done.")
+    return {
+        "pages": len(page_indices),
+        "entities": entity_count,
+        "text_items": text_count,
+    }

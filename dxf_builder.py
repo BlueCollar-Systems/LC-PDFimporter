@@ -1,0 +1,320 @@
+# -*- coding: utf-8 -*-
+# dxf_builder.py -- Convert pdfcadcore Primitives to ezdxf DXF entities
+# Copyright (c) 2024-2026 BlueCollar Systems -- BUILT. NOT BOUGHT.
+# Licensed under the MIT License. See LICENSE for details.
+"""
+Translates a list of :class:`PageData` objects produced by *pdfcadcore* into
+an :mod:`ezdxf` ``Drawing``.  Handles geometry mapping, layers, colors,
+line-weights, and dash-pattern linetypes.
+"""
+from __future__ import annotations
+
+import math
+from typing import Dict, List, Optional, Tuple
+
+import ezdxf
+from ezdxf import colors as ezdxf_colors
+
+from pdfcadcore.primitives import PageData, Primitive
+from pdfcadcore.import_config import ImportConfig
+
+from dxf_text_builder import build_text
+
+# ---------------------------------------------------------------------------
+# DXF version string -> ezdxf ``dxfversion`` keyword
+# ---------------------------------------------------------------------------
+_VERSION_MAP: Dict[str, str] = {
+    "R12":   "R12",
+    "R2000": "R2000",
+    "R2004": "R2004",
+    "R2007": "R2007",
+    "R2010": "R2010",
+    "R2013": "R2013",
+    "R2018": "R2018",
+}
+
+# Standard linetypes that mirror common dash patterns
+_STANDARD_LINETYPES: List[Tuple[str, str, List[float]]] = [
+    # (name, description, pattern_elements)
+    # Pattern elements: positive = dash, negative = gap, 0 = dot
+    ("DASHED",   "Dashed __ __ __",        [0.75, -0.25]),
+    ("DOTTED",   "Dotted . . . .",         [0.0, -0.25]),
+    ("DASHDOT",  "Dash-dot __ . __ .",     [0.75, -0.25, 0.0, -0.25]),
+    ("DASHDOTDOT", "Dash-dot-dot __ . . ", [0.75, -0.25, 0.0, -0.25, 0.0, -0.25]),
+    ("CENTER",   "Center ____ _ ____ _",   [1.25, -0.25, 0.25, -0.25]),
+    ("PHANTOM",  "Phantom ____ _ _ ____",  [1.25, -0.25, 0.25, -0.25, 0.25, -0.25]),
+]
+
+
+# ---------------------------------------------------------------------------
+# ACI (AutoCAD Color Index) helpers
+# ---------------------------------------------------------------------------
+# Basic ACI mapping for R12 which lacks true-color support
+_ACI_TABLE: List[Tuple[int, int, int, int]] = [
+    (255, 0,   0,   1),   # red
+    (255, 255, 0,   2),   # yellow
+    (0,   255, 0,   3),   # green
+    (0,   255, 255, 4),   # cyan
+    (0,   0,   255, 5),   # blue
+    (255, 0,   255, 6),   # magenta
+    (255, 255, 255, 7),   # white / default
+    (128, 128, 128, 8),   # gray
+    (192, 192, 192, 9),   # light gray
+]
+
+
+def _rgb_to_aci(r: float, g: float, b: float) -> int:
+    """Convert RGB (0-1 floats) to the nearest AutoCAD Color Index."""
+    ri, gi, bi = round(r * 255), round(g * 255), round(b * 255)
+    # Near-black and near-white -> 7 (renders as white on dark bg / black on
+    # light bg in most CAD programs)
+    if ri < 10 and gi < 10 and bi < 10:
+        return 7
+    if ri > 245 and gi > 245 and bi > 245:
+        return 7
+    best_aci = 7
+    best_dist = float("inf")
+    for cr, cg, cb, idx in _ACI_TABLE:
+        d = (ri - cr) ** 2 + (gi - cg) ** 2 + (bi - cb) ** 2
+        if d < best_dist:
+            best_dist = d
+            best_aci = idx
+    return best_aci
+
+
+def _true_color_int(r: float, g: float, b: float) -> int:
+    """Pack RGB (0-1 floats) into a 24-bit DXF true-color integer."""
+    return ezdxf_colors.rgb2int(
+        (round(r * 255), round(g * 255), round(b * 255))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dash-pattern classification
+# ---------------------------------------------------------------------------
+def _classify_dash(pattern: list | None) -> str | None:
+    """Return the best-matching standard linetype name for *pattern*."""
+    if not pattern:
+        return None
+    total = sum(abs(v) for v in pattern if isinstance(v, (int, float)))
+    if total < 0.01:
+        return None
+    n = len(pattern)
+    if n == 1:
+        return "DASHED"
+    if n == 2:
+        dash, gap = abs(pattern[0]), abs(pattern[1])
+        if dash < 0.01:
+            return "DOTTED"
+        if gap > dash * 0.8:
+            return "DASHED"
+        return "DASHED"
+    if n == 4:
+        # dash-gap-dot-gap  or  dash-gap-dash-gap
+        if abs(pattern[2]) < 0.05:
+            return "DASHDOT"
+        return "CENTER"
+    if n >= 6:
+        dots = sum(1 for v in pattern if abs(v) < 0.05)
+        if dots >= 2:
+            return "DASHDOTDOT"
+        return "PHANTOM"
+    return "DASHED"
+
+
+# ---------------------------------------------------------------------------
+# Layer helpers
+# ---------------------------------------------------------------------------
+def _safe_layer_name(name: str) -> str:
+    """Sanitise a string for use as a DXF layer name."""
+    # DXF forbids: <>/\":;?*|=`
+    for ch in '<>/\\":;?*|=`':
+        name = name.replace(ch, "_")
+    return name.strip() or "0"
+
+
+def _ensure_layer(doc: ezdxf.document.Drawing, name: str) -> None:
+    """Create layer *name* if it does not already exist."""
+    if name not in doc.layers:
+        doc.layers.add(name)
+
+
+# ---------------------------------------------------------------------------
+# Entity attribute builder
+# ---------------------------------------------------------------------------
+def _make_attribs(
+    prim: Primitive,
+    layer_name: str,
+    config: ImportConfig,
+    is_r12: bool,
+) -> dict:
+    """Build the ``dxfattribs`` dict for an ezdxf entity."""
+    attribs: dict = {"layer": layer_name}
+
+    # Color
+    if config.group_by_color and prim.stroke_color:
+        r, g, b = prim.stroke_color
+        if is_r12:
+            attribs["color"] = _rgb_to_aci(r, g, b)
+        else:
+            attribs["true_color"] = _true_color_int(r, g, b)
+
+    # Lineweight (in 1/100 mm, clamped to DXF valid range 0..211)
+    if config.assign_lineweight and prim.line_width and not is_r12:
+        lw = max(0, min(211, round(prim.line_width * 100)))
+        attribs["lineweight"] = lw
+
+    return attribs
+
+
+# ---------------------------------------------------------------------------
+# Geometry writers
+# ---------------------------------------------------------------------------
+def _add_line(msp, prim: Primitive, attribs: dict) -> int:
+    """Add a LINE entity. Returns 1."""
+    p0, p1 = prim.points[0], prim.points[1]
+    msp.add_line(start=p0, end=p1, dxfattribs=attribs)
+    return 1
+
+
+def _add_polyline(msp, prim: Primitive, attribs: dict) -> int:
+    """Add an LWPOLYLINE. Returns 1."""
+    msp.add_lwpolyline(
+        prim.points,
+        close=prim.closed,
+        dxfattribs=attribs,
+    )
+    return 1
+
+
+def _add_arc(msp, prim: Primitive, attribs: dict) -> int:
+    """Add an ARC entity (angles in degrees). Returns 1."""
+    if prim.center is None or prim.radius is None:
+        return _add_polyline(msp, prim, attribs)
+    msp.add_arc(
+        center=prim.center,
+        radius=prim.radius,
+        start_angle=prim.start_angle or 0.0,
+        end_angle=prim.end_angle or 360.0,
+        dxfattribs=attribs,
+    )
+    return 1
+
+
+def _add_circle(msp, prim: Primitive, attribs: dict) -> int:
+    """Add a CIRCLE entity. Returns 1."""
+    if prim.center is None or prim.radius is None:
+        return _add_polyline(msp, prim, attribs)
+    msp.add_circle(
+        center=prim.center,
+        radius=prim.radius,
+        dxfattribs=attribs,
+    )
+    return 1
+
+
+def _add_closed_loop(msp, prim: Primitive, attribs: dict) -> int:
+    """Add a closed LWPOLYLINE. Returns 1."""
+    msp.add_lwpolyline(prim.points, close=True, dxfattribs=attribs)
+    return 1
+
+
+def _add_rect(msp, prim: Primitive, attribs: dict) -> int:
+    """Add a rectangle as a closed LWPOLYLINE (4 corners). Returns 1."""
+    pts = prim.points
+    if len(pts) < 4:
+        return _add_polyline(msp, prim, attribs)
+    msp.add_lwpolyline(pts[:4], close=True, dxfattribs=attribs)
+    return 1
+
+
+# Dispatch table: primitive type -> writer function
+_WRITERS = {
+    "line":        _add_line,
+    "polyline":    _add_polyline,
+    "arc":         _add_arc,
+    "circle":      _add_circle,
+    "closed_loop": _add_closed_loop,
+    "rect":        _add_rect,
+}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def build_dxf(
+    pages_data: List[PageData],
+    config: ImportConfig,
+    dxf_version: str = "R2010",
+) -> ezdxf.document.Drawing:
+    """Build an ezdxf ``Drawing`` from a list of :class:`PageData`.
+
+    Parameters
+    ----------
+    pages_data:
+        One :class:`PageData` per converted PDF page.
+    config:
+        Import configuration controlling color, text, dash mapping, etc.
+    dxf_version:
+        Target DXF version string (e.g. ``"R2010"``).
+
+    Returns
+    -------
+    ezdxf.document.Drawing
+        The fully-built DXF document, ready for ``doc.saveas(path)``.
+    """
+    ver = _VERSION_MAP.get(dxf_version, "R2010")
+    is_r12 = ver == "R12"
+
+    doc = ezdxf.new(dxfversion=ver)
+    msp = doc.modelspace()
+
+    # Register standard linetypes (skip for R12 -- limited support)
+    if not is_r12 and config.map_dashes:
+        for lt_name, lt_desc, lt_pattern in _STANDARD_LINETYPES:
+            if lt_name not in doc.linetypes:
+                doc.linetypes.add(
+                    lt_name,
+                    pattern=lt_pattern,
+                    description=lt_desc,
+                )
+
+    entity_count = 0
+    text_count = 0
+
+    for page in pages_data:
+        page_layer = _safe_layer_name(f"Page_{page.page_number}")
+        _ensure_layer(doc, page_layer)
+
+        # Track OCG layers already created for this page
+        ocg_created: set[str] = set()
+
+        for prim in page.primitives:
+            # Determine layer name
+            if prim.layer_name:
+                layer = _safe_layer_name(prim.layer_name)
+                if layer not in ocg_created:
+                    _ensure_layer(doc, layer)
+                    ocg_created.add(layer)
+            else:
+                layer = page_layer
+
+            attribs = _make_attribs(prim, layer, config, is_r12)
+
+            # Linetype from dash pattern
+            if config.map_dashes and prim.dash_pattern and not is_r12:
+                lt = _classify_dash(prim.dash_pattern)
+                if lt and lt in doc.linetypes:
+                    attribs["linetype"] = lt
+
+            writer = _WRITERS.get(prim.type, _add_polyline)
+            entity_count += writer(msp, prim, attribs)
+
+        # Text entities
+        if config.import_text:
+            for ti in page.text_items:
+                layer = page_layer
+                build_text(ti, msp, layer, config, is_r12)
+                text_count += 1
+
+    return doc, entity_count, text_count

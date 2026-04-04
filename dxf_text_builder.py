@@ -1,0 +1,135 @@
+# -*- coding: utf-8 -*-
+# dxf_text_builder.py -- NormalizedText -> DXF text entities
+# Copyright (c) 2024-2026 BlueCollar Systems -- BUILT. NOT BOUGHT.
+# Licensed under the MIT License. See LICENSE for details.
+"""
+Convert :class:`NormalizedText` items produced by *pdfcadcore* into DXF
+``TEXT`` or ``MTEXT`` entities via :mod:`ezdxf`.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import ezdxf
+
+if TYPE_CHECKING:
+    from ezdxf.layouts import BaseLayout
+
+from pdfcadcore.primitives import NormalizedText
+from pdfcadcore.import_config import ImportConfig
+
+# Threshold (character count) above which MTEXT is used instead of TEXT.
+_MTEXT_THRESHOLD = 120
+
+# DXF text styles created on demand.  Maps font_name -> style_name.
+_created_styles: dict[str, str] = {}
+
+# Counter for generating unique style names.
+_style_counter = 0
+
+
+def _ensure_text_style(doc: ezdxf.document.Drawing, font_name: str) -> str:
+    """Return the DXF text-style name for *font_name*, creating it if needed."""
+    global _style_counter  # noqa: PLW0603
+
+    if not font_name:
+        return "Standard"
+
+    if font_name in _created_styles:
+        return _created_styles[font_name]
+
+    # Build a short style name
+    _style_counter += 1
+    style_name = f"S{_style_counter}"
+
+    # Map common PDF font stems to reasonable TrueType fallbacks
+    base = font_name.split("-")[0].split("+")[-1]  # strip subset prefix
+    ttf = "arial.ttf"
+    lower = base.lower()
+    if "courier" in lower or "mono" in lower:
+        ttf = "cour.ttf"
+    elif "times" in lower or "serif" in lower:
+        ttf = "times.ttf"
+    elif "helv" in lower or "arial" in lower or "sans" in lower:
+        ttf = "arial.ttf"
+
+    try:
+        doc.styles.add(style_name, font=ttf)
+    except ezdxf.DXFTableEntryError:
+        pass  # already exists (unlikely)
+
+    _created_styles[font_name] = style_name
+    return style_name
+
+
+def build_text(
+    text_item: NormalizedText,
+    msp: "BaseLayout",
+    layer_name: str,
+    config: ImportConfig,
+    is_r12: bool = False,
+) -> None:
+    """Add a TEXT or MTEXT entity to *msp* for the given *text_item*.
+
+    Parameters
+    ----------
+    text_item:
+        A :class:`NormalizedText` from the extraction pipeline.
+    msp:
+        The ezdxf modelspace (or any layout) to add the entity to.
+    layer_name:
+        DXF layer name for the entity.
+    config:
+        Import configuration (controls text_mode, etc.).
+    is_r12:
+        ``True`` when targeting DXF R12 (limited entity support).
+    """
+    content = text_item.text
+    if not content or not content.strip():
+        return
+
+    # Font size: NormalizedText.font_size is already in mm.
+    height = max(0.5, text_item.font_size)
+
+    # Insertion point
+    insert = (text_item.insertion[0], text_item.insertion[1])
+
+    # Rotation (degrees)
+    rotation = text_item.rotation or 0.0
+
+    # Base attributes
+    attribs: dict = {
+        "layer": layer_name,
+        "rotation": rotation,
+    }
+
+    doc = msp.doc
+
+    # Resolve text style (skip for R12 -- limited style support)
+    if not is_r12 and doc is not None:
+        style = _ensure_text_style(doc, text_item.font_name)
+        attribs["style"] = style
+
+    # Choose TEXT vs MTEXT
+    if len(content) > _MTEXT_THRESHOLD and not is_r12:
+        # MTEXT -- multi-line / long text
+        attribs["char_height"] = height
+        msp.add_mtext(
+            content,
+            dxfattribs=attribs,
+        ).set_location(insert, attachment_point=1)  # TOP_LEFT
+    else:
+        # Single-line TEXT
+        attribs["height"] = height
+        attribs["insert"] = insert
+        msp.add_text(
+            content,
+            dxfattribs=attribs,
+        )
+
+
+def reset_text_styles() -> None:
+    """Clear the cached text-style registry (call between documents)."""
+    global _style_counter  # noqa: PLW0603
+    _created_styles.clear()
+    _style_counter = 0

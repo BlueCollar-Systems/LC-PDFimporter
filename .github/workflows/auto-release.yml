@@ -1,0 +1,43 @@
+name: auto-release
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'pdf2dxf.py'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(python -c "
+          import re
+          with open('pdf2dxf.py') as f:
+              m = re.search(r'__version__\s*=\s*[\"'']([^\"'']+)', f.read())
+              if m: print(m.group(1))
+          ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build release
+        run: python build_release.py
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: PDF to DXF Converter v${{ steps.version.outputs.version }}
+          files: dist/*.zip
+          generate_release_notes: true
