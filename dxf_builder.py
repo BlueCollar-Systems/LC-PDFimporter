@@ -10,7 +10,7 @@ line-weights, and dash-pattern linetypes.
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import ezdxf
 from ezdxf import colors as ezdxf_colors

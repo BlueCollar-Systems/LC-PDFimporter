@@ -104,7 +104,7 @@ def convert(
     # ------------------------------------------------------------------
     pages_data: List[PageData] = []
 
-    for idx, page_num in enumerate(page_indices, 1):
+    for page_num in page_indices:
         _log(f"Extracting page {page_num + 1}/{total_pages}...")
         fitz_page = pdf_doc.load_page(page_num)
 
