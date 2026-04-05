@@ -76,11 +76,14 @@ def convert(
     # ------------------------------------------------------------------
     _log("Opening PDF...")
     try:
-        import fitz  # PyMuPDF
-    except ImportError as exc:
-        raise ImportError(
-            "PyMuPDF (fitz) is required.  Install with:  pip install PyMuPDF"
-        ) from exc
+        import pymupdf as fitz  # PyMuPDF >= 1.24 preferred name
+    except ImportError:
+        try:
+            import fitz  # Legacy fallback
+        except ImportError as exc:
+            raise ImportError(
+                "PyMuPDF (fitz) is required.  Install with:  pip install PyMuPDF"
+            ) from exc
 
     pdf_doc = fitz.open(input_path)
     total_pages = pdf_doc.page_count

@@ -7,7 +7,10 @@ from pathlib import Path
 import tempfile
 from typing import Iterable, List, Optional
 
-import fitz
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24 preferred name
+except ImportError:
+    import fitz  # Legacy fallback
 
 from .PDFDocumentProfiler import profile as profile_page
 from .PDFGeometryCleanup import circle_fit

@@ -9,7 +9,10 @@ from typing import Dict, Optional, Tuple
 import ezdxf
 from ezdxf.colors import rgb2int
 from ezdxf.units import MM
-import fitz
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24 preferred name
+except ImportError:
+    import fitz  # Legacy fallback
 
 from ..core.document import DocumentExtraction
 

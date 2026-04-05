@@ -18,10 +18,22 @@ DraftSight, QCAD, and any DXF-compatible CAD software.
 - CLI and GUI interfaces
 - Built on pdfcadcore shared extraction engine
 
+## Compatibility
+
+| LibreCAD Version | Python | ezdxf | PyMuPDF | Status |
+|-----------------|--------|-------|---------|--------|
+| 2.1.x+ | 3.10+ | 1.0+ | >=1.24,<2.0 | ⚠️ Expected |
+| 2.0.x | 3.8+ | 1.0+ | >=1.24,<2.0 | ⚠️ Expected |
+
+Evidence levels:
+- `✅ Verified`: host-run validation evidence captured.
+- `⚠️ Expected`: syntax/runtime compatible but no host-run evidence yet.
+- `❌ Not supported`: outside maintained/tested compatibility scope.
+
 ## Requirements
 
 - Python 3.10+
-- PyMuPDF >= 1.24
+- PyMuPDF >=1.24,<2.0
 - ezdxf >= 1.0
 
 ## Installation
@@ -146,6 +158,19 @@ dxf_builder.py        Primitive -> DXF entity mapping
 dxf_text_builder.py   Text -> DXF TEXT/MTEXT mapping
 pdfcadcore/           Shared PDF extraction core
 ```
+
+## Known Limitations
+
+| Limitation | Details |
+|-----------|---------|
+| Encrypted PDFs | Password-protected PDFs must be unlocked before import |
+| Compression filters | Decoding is delegated to PyMuPDF. Malformed or non-standard compressed object streams may fail to parse |
+| Raster-only scans | Pure raster PDFs produce no vector geometry |
+| Clipped/XObject-heavy PDFs | Complex clip stacks and deeply nested form XObjects can produce partial geometry |
+| MTEXT in LibreCAD | LibreCAD has known issues with MTEXT bounding boxes; TEXT fallback is used automatically |
+| Embedded subset fonts | Text using embedded subset fonts may not render correctly |
+| DXF version | R2010 is the recommended default; R12 mode uses TEXT entities only |
+| Legacy hosts | LibreCAD/DXF consumer behavior outside the tested matrix is expected-only until verified |
 
 ## License
 

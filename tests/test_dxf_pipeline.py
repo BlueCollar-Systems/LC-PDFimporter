@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 import ezdxf
-import fitz
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24 preferred name
+except ImportError:
+    import fitz  # Legacy fallback
 
 from librecad_pdf_importer.exporters.dxf_exporter import DxfExportOptions, export_to_dxf
 from librecad_pdf_importer.importer import run_import

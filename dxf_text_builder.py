@@ -68,6 +68,8 @@ def build_text(
     layer_name: str,
     config: ImportConfig,
     is_r12: bool = False,
+    target_app: str = "generic",
+    dxf_version: str = "R2010",
 ) -> None:
     """Add a TEXT or MTEXT entity to *msp* for the given *text_item*.
 
@@ -83,6 +85,14 @@ def build_text(
         Import configuration (controls text_mode, etc.).
     is_r12:
         ``True`` when targeting DXF R12 (limited entity support).
+    target_app:
+        Target CAD application: ``"generic"``, ``"librecad"``, etc.
+        When ``"librecad"``, MTEXT is avoided because LibreCAD has
+        known issues with MTEXT bounding boxes.
+    dxf_version:
+        Target DXF version string (e.g. ``"R2010"``).  When the version
+        is ``"R2000"`` or earlier, TEXT entities are used exclusively
+        because older DXF versions have limited MTEXT support.
     """
     content = text_item.text
     if not content or not content.strip():
@@ -110,8 +120,14 @@ def build_text(
         style = _ensure_text_style(doc, text_item.font_name)
         attribs["style"] = style
 
+    # Determine whether MTEXT is allowed.  Force TEXT-only when:
+    #   - targeting DXF R12 (no MTEXT support at all)
+    #   - target_app is "librecad" (MTEXT bounding-box issues)
+    #   - dxf_version is R2000 or earlier (limited MTEXT support)
+    force_text = is_r12 or target_app.lower() == "librecad" or dxf_version <= "R2000"
+
     # Choose TEXT vs MTEXT
-    if len(content) > _MTEXT_THRESHOLD and not is_r12:
+    if len(content) > _MTEXT_THRESHOLD and not force_text:
         # MTEXT -- multi-line / long text
         attribs["char_height"] = height
         msp.add_mtext(

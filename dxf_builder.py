@@ -160,7 +160,11 @@ def _make_attribs(
             attribs["true_color"] = _true_color_int(r, g, b)
 
     # Lineweight (in 1/100 mm, clamped to DXF valid range 0..211)
-    if config.assign_lineweight and prim.line_width and not is_r12:
+    # Backward compatible with either attribute spelling.
+    assign_lw = bool(
+        getattr(config, "assign_linewidth", getattr(config, "assign_lineweight", True))
+    )
+    if assign_lw and prim.line_width and not is_r12:
         lw = max(0, min(211, round(prim.line_width * 100)))
         attribs["lineweight"] = lw
 
@@ -358,7 +362,7 @@ def build_dxf(
         if config.import_text and config.text_mode != "none":
             for ti in page.text_items:
                 layer = page_layer
-                build_text(ti, msp, layer, config, is_r12)
+                build_text(ti, msp, layer, config, is_r12, dxf_version=dxf_version)
                 text_count += 1
 
     return doc, entity_count, text_count
