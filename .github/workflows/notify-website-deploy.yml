@@ -20,7 +20,7 @@ jobs:
       - name: Check dispatch token secret
         id: token_check
         env:
-          WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN || secrets.BLUECOLLAR_WEBSITE_DISPATCH_TOKEN || secrets.REPO_DISPATCH_TOKEN }}
         run: |
           if [ -n "$WEBSITE_DISPATCH_TOKEN" ]; then
             echo "has_token=true" >> "$GITHUB_OUTPUT"
@@ -31,14 +31,14 @@ jobs:
       - name: Skip notice (no token configured)
         if: steps.token_check.outputs.has_token != 'true'
         run: |
-          echo "::warning::Skipping website dispatch because WEBSITE_DISPATCH_TOKEN is not configured."
-          echo "Add WEBSITE_DISPATCH_TOKEN secret to enable cross-repo dispatch to BlueCollar-Website."
+          echo "::warning::Skipping website dispatch because no valid dispatch token secret is configured."
+          echo "Set WEBSITE_DISPATCH_TOKEN (or BLUECOLLAR_WEBSITE_DISPATCH_TOKEN / REPO_DISPATCH_TOKEN) to enable cross-repo dispatch."
 
       - name: Trigger BlueCollar-Website deployment
         if: steps.token_check.outputs.has_token == 'true'
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          github-token: ${{ secrets.WEBSITE_DISPATCH_TOKEN || secrets.BLUECOLLAR_WEBSITE_DISPATCH_TOKEN || secrets.REPO_DISPATCH_TOKEN }}
           script: |
             const isRelease = context.eventName === 'release';
             const eventType = isRelease ? 'product-release' : 'product-update';
