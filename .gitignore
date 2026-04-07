@@ -11,3 +11,6 @@ build/
 .idea/
 *.swp
 *.dxf
+.pytest_cache/
+.ruff_cache/
+dev_logs/
