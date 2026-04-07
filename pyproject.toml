@@ -13,7 +13,7 @@ authors = [
   { name = "BlueCollar Systems" }
 ]
 dependencies = [
-  "PyMuPDF>=1.24",
+  "PyMuPDF>=1.24,<2.0",
   "ezdxf>=1.0"
 ]
 
