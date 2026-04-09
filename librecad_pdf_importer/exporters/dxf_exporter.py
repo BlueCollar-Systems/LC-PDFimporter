@@ -26,6 +26,13 @@ class DxfExportOptions:
     attach_metadata: bool = True
     dxf_version: str = "R2018"
     map_dashes: bool = True
+    # Page arrangement for multi-page exports:
+    # - "spread": stack pages with a 20% gap (default)
+    # - "compact": stack pages with small configurable gap
+    # - "touch": stack pages edge-to-edge (no gap)
+    # - "overlay": place all pages on same origin
+    page_arrangement: str = "spread"
+    page_gap_ratio: float = 0.02
 
 
 @dataclass
@@ -48,7 +55,17 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
     dash_cache: Dict[str, str] = {}
     image_def_cache: Dict[str, object] = {}
 
+    # Multi-page placement offset.
+    _stack_offset_y = 0.0
+    arrangement = (opts.page_arrangement or "spread").strip().lower()
+    if arrangement not in {"spread", "compact", "touch", "overlay"}:
+        arrangement = "spread"
+    gap_ratio = max(0.0, float(opts.page_gap_ratio or 0.0))
+
     for page in extraction.pages:
+        # Apply page stacking offset to all coordinates
+        dy = _stack_offset_y
+
         for primitive in page.page_data.primitives:
             layer = _layer_name(page.page_data.page_number, primitive.layer_name, primitive.stroke_color, opts)
             _ensure_layer(doc, layer, primitive.stroke_color)
@@ -61,35 +78,48 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                 if ltype:
                     attribs["linetype"] = ltype
 
+            # Helper to offset a point by the page stacking offset
+            def _ofs(pt):
+                return (pt[0], pt[1] + dy)
+
             if primitive.type == "line" and primitive.points and len(primitive.points) == 2:
-                msp.add_line(primitive.points[0], primitive.points[1], dxfattribs=attribs)
+                msp.add_line(_ofs(primitive.points[0]), _ofs(primitive.points[1]), dxfattribs=attribs)
                 entity_count += 1
             elif primitive.type == "circle" and primitive.center and primitive.radius:
-                msp.add_circle(primitive.center, primitive.radius, dxfattribs=attribs)
+                msp.add_circle(_ofs(primitive.center), primitive.radius, dxfattribs=attribs)
                 entity_count += 1
             elif primitive.type == "arc" and primitive.center and primitive.radius:
                 start = float(primitive.start_angle or 0.0)
                 end = float(primitive.end_angle or 0.0)
                 if math.isclose(start, end, abs_tol=1e-6):
                     end = (end + 359.999) % 360.0
-                msp.add_arc(primitive.center, primitive.radius, start, end, dxfattribs=attribs)
+                msp.add_arc(_ofs(primitive.center), primitive.radius, start, end, dxfattribs=attribs)
                 entity_count += 1
             elif primitive.points and len(primitive.points) >= 2:
-                msp.add_lwpolyline(primitive.points, format="xy", close=bool(primitive.closed), dxfattribs=attribs)
+                offset_pts = [_ofs(p) for p in primitive.points]
+                msp.add_lwpolyline(offset_pts, format="xy", close=bool(primitive.closed), dxfattribs=attribs)
                 entity_count += 1
 
         if opts.include_text:
             for text in page.page_data.text_items:
                 layer = _layer_name(page.page_data.page_number, "TEXT", None, opts)
                 _ensure_layer(doc, layer, None)
+                text_attribs = {
+                    "layer": layer,
+                    "height": max(float(text.font_size), 0.1),
+                    "rotation": float(text.rotation or 0.0),
+                    "insert": (float(text.insertion[0]), float(text.insertion[1]) + dy),
+                }
+                # Apply source text color when available
+                text_color = getattr(text, "color", None)
+                if text_color is not None:
+                    ri = round(text_color[0] * 255)
+                    gi = round(text_color[1] * 255)
+                    bi = round(text_color[2] * 255)
+                    text_attribs["true_color"] = rgb2int((ri, gi, bi))
                 txt = msp.add_text(
                     text.text,
-                    dxfattribs={
-                        "layer": layer,
-                        "height": max(float(text.font_size), 0.1),
-                        "rotation": float(text.rotation or 0.0),
-                        "insert": (float(text.insertion[0]), float(text.insertion[1])),
-                    },
+                    dxfattribs=text_attribs,
                 )
                 if opts.attach_metadata:
                     txt.set_xdata("BC_PDF", [
@@ -118,12 +148,24 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                 _ensure_layer(doc, layer, None)
                 msp.add_image(
                     image_def,
-                    insert=(placement.x_mm, placement.y_mm),
+                    insert=(placement.x_mm, placement.y_mm + dy),
                     size_in_units=(placement.width_mm, placement.height_mm),
                     dxfattribs={"layer": layer},
                 )
                 entity_count += 1
                 image_count += 1
+
+        # Advance page placement offset for the next page.
+        if arrangement == "overlay":
+            continue
+        if arrangement == "spread":
+            step = page.page_data.height * 1.2
+        elif arrangement == "touch":
+            step = page.page_data.height
+        else:
+            # Compact stacking keeps pages readable without large gaps.
+            step = page.page_data.height * (1.0 + gap_ratio)
+        _stack_offset_y -= step
 
     output = Path(output_path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

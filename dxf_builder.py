@@ -15,6 +15,8 @@ from typing import Dict, List, Tuple
 import ezdxf
 from ezdxf import colors as ezdxf_colors
 
+from dataclasses import replace as _dc_replace
+
 from pdfcadcore.primitives import PageData, Primitive
 from pdfcadcore.import_config import ImportConfig
 
@@ -38,7 +40,7 @@ _STANDARD_LINETYPES: List[Tuple[str, str, List[float]]] = [
     # (name, description, pattern_elements)
     # Pattern elements: positive = dash, negative = gap, 0 = dot
     ("DASHED",   "Dashed __ __ __",        [0.75, -0.25]),
-    ("DOTTED",   "Dotted . . . .",         [0.0, -0.25]),
+    ("DOTTED",   "Dotted . . . .",         [0.05, -0.25]),
     ("DASHDOT",  "Dash-dot __ . __ .",     [0.75, -0.25, 0.0, -0.25]),
     ("DASHDOTDOT", "Dash-dot-dot __ . . ", [0.75, -0.25, 0.0, -0.25, 0.0, -0.25]),
     ("CENTER",   "Center ____ _ ____ _",   [1.25, -0.25, 0.25, -0.25]),
@@ -66,10 +68,7 @@ _ACI_TABLE: List[Tuple[int, int, int, int]] = [
 def _rgb_to_aci(r: float, g: float, b: float) -> int:
     """Convert RGB (0-1 floats) to the nearest AutoCAD Color Index."""
     ri, gi, bi = round(r * 255), round(g * 255), round(b * 255)
-    # Near-black and near-white -> 7 (renders as white on dark bg / black on
-    # light bg in most CAD programs)
-    if ri < 10 and gi < 10 and bi < 10:
-        return 7
+    # Near-white -> 7 (renders as white on dark bg / black on light bg)
     if ri > 245 and gi > 245 and bi > 245:
         return 7
     best_aci = 7
@@ -106,9 +105,9 @@ def _classify_dash(pattern: list | None) -> str | None:
         dash, gap = abs(pattern[0]), abs(pattern[1])
         if dash < 0.01:
             return "DOTTED"
-        if gap > dash * 0.8:
+        if gap > dash * 2.0:
             return "DASHED"
-        return "DASHED"
+        return "CENTER"  # Short gap relative to dash -> center line style
     if n == 4:
         # dash-gap-dot-gap  or  dash-gap-dash-gap
         if abs(pattern[2]) < 0.05:
@@ -133,10 +132,20 @@ def _safe_layer_name(name: str) -> str:
     return name.strip() or "0"
 
 
-def _ensure_layer(doc: ezdxf.document.Drawing, name: str) -> None:
+def _ensure_layer(
+    doc: ezdxf.document.Drawing,
+    name: str,
+    color: int | None = None,
+    true_color: int | None = None,
+) -> None:
     """Create layer *name* if it does not already exist."""
     if name not in doc.layers:
-        doc.layers.add(name)
+        kwargs: dict = {}
+        if color is not None:
+            kwargs["color"] = color
+        if true_color is not None:
+            kwargs["true_color"] = true_color
+        doc.layers.add(name, dxfattribs=kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +174,10 @@ def _make_attribs(
         getattr(config, "assign_linewidth", getattr(config, "assign_lineweight", True))
     )
     if assign_lw and prim.line_width and not is_r12:
-        lw = max(0, min(211, round(prim.line_width * 100)))
+        # Convert line_width from points to mm, then to DXF 1/100mm units.
+        # DXF lineweight 0 means "bylayer"; minimum valid weight is 5 (0.05mm).
+        width_mm = float(prim.line_width) * (25.4 / 72.0)
+        lw = int(max(5, min(211, round(width_mm * 100))))
         attribs["lineweight"] = lw
 
     return attribs
@@ -229,11 +241,17 @@ def _add_arc(msp, prim: Primitive, attribs: dict) -> int:
     """Add an ARC entity (angles in degrees). Returns 1."""
     if prim.center is None or prim.radius is None:
         return _add_polyline(msp, prim, attribs)
+    start = prim.start_angle or 0.0
+    end = prim.end_angle or 360.0
+    # Degenerate arc (start == end) -> treat as full circle to avoid
+    # zero-length entity that confuses some CAD viewers.
+    if math.isclose(start, end, abs_tol=1e-6):
+        end = (end + 359.999) % 360.0
     msp.add_arc(
         center=prim.center,
         radius=prim.radius,
-        start_angle=prim.start_angle or 0.0,
-        end_angle=prim.end_angle or 360.0,
+        start_angle=start,
+        end_angle=end,
         dxfattribs=attribs,
     )
     return 1
@@ -320,6 +338,10 @@ def build_dxf(
     entity_count = 0
     text_count = 0
 
+    # Multi-page stacking: shift each page downward by accumulated heights.
+    _stack_offset_y = 0.0
+    _STACK_MULTIPLIER = 1.2  # 20% gap between pages
+
     for page in pages_data:
         page_layer = _safe_layer_name(f"Page_{page.page_number}")
         _ensure_layer(doc, page_layer)
@@ -331,7 +353,20 @@ def build_dxf(
         hatch_layer = _safe_layer_name(f"Hatch_Page_{page.page_number}")
         hatch_layer_created = False
 
-        for prim in page.primitives:
+        dy = _stack_offset_y
+
+        for _raw_prim in page.primitives:
+            # Apply page stacking offset (non-destructive copy)
+            if dy != 0.0:
+                prim = _dc_replace(
+                    _raw_prim,
+                    points=[(x, y + dy) for x, y in _raw_prim.points],
+                    center=(_raw_prim.center[0], _raw_prim.center[1] + dy) if _raw_prim.center else None,
+                    bbox=(_raw_prim.bbox[0], _raw_prim.bbox[1] + dy, _raw_prim.bbox[2], _raw_prim.bbox[3] + dy) if _raw_prim.bbox else None,
+                )
+            else:
+                prim = _raw_prim
+
             # Determine layer name
             if "hatch_line" in prim.generic_tags:
                 # Place hatch entities on a dedicated Hatch layer
@@ -361,8 +396,17 @@ def build_dxf(
         # Text entities — add for "labels" and "geometry" modes; skip for "none"
         if config.import_text and config.text_mode != "none":
             for ti in page.text_items:
+                # Apply page stacking offset to text insertion point
+                if dy != 0.0:
+                    ti = _dc_replace(
+                        ti,
+                        insertion=(ti.insertion[0], ti.insertion[1] + dy),
+                    )
                 layer = page_layer
                 build_text(ti, msp, layer, config, is_r12, dxf_version=dxf_version)
                 text_count += 1
+
+        # Advance stacking offset for the next page
+        _stack_offset_y -= page.height * _STACK_MULTIPLIER
 
     return doc, entity_count, text_count

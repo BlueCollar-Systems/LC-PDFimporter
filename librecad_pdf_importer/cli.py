@@ -55,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dxf-version", default="R2018",
                         choices=["R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018"],
                         help="Target DXF version")
+    parser.add_argument("--page-arrangement", default="spread",
+                        choices=["spread", "compact", "touch", "overlay"],
+                        help="Multi-page placement mode (default: spread = 20%% gap)")
+    parser.add_argument("--page-gap-ratio", type=float, default=0.02,
+                        help="Gap ratio used when --page-arrangement=compact")
     parser.add_argument("--reference-detected-mm", type=float, default=None,
                         help="Measured length in imported geometry (mm)")
     parser.add_argument("--reference-real-mm", type=float, default=None,
@@ -127,6 +132,8 @@ def main() -> int:
             attach_metadata=True,
             dxf_version=args.dxf_version,
             map_dashes=bool(run.config.map_dashes),
+            page_arrangement=args.page_arrangement,
+            page_gap_ratio=max(0.0, float(args.page_gap_ratio or 0.0)),
         ),
     )
 

@@ -51,6 +51,53 @@ def _norm_color(col) -> Tuple[float, float, float]:
         return (0.0, 0.0, 0.0)
 
 
+def _append_linearized_cubic(
+    current_pts: List[Tuple[float, float]],
+    p0: Tuple[float, float],
+    p1: Tuple[float, float],
+    p2: Tuple[float, float],
+    p3: Tuple[float, float],
+    *,
+    max_samples: int = 32,
+) -> None:
+    """Append a cubic Bezier segment as a polyline."""
+    if not current_pts:
+        current_pts.append(p0)
+    samples = max(4, min(max_samples, int(math.ceil(_dist(p0, p3) / 0.5))))
+    for i in range(1, samples + 1):
+        t = i / float(samples)
+        current_pts.append(_bezier_pt(p0, p1, p2, p3, t))
+
+
+def _quad_to_points(
+    quad_obj,
+    page_h: float,
+    flip_y: bool,
+    scale: float,
+) -> List[Tuple[float, float]]:
+    """Convert a PyMuPDF Quad into a closed 4-point polyline."""
+    corners = []
+    try:
+        corners = [
+            _xy(getattr(quad_obj, "ul")),
+            _xy(getattr(quad_obj, "ur")),
+            _xy(getattr(quad_obj, "lr")),
+            _xy(getattr(quad_obj, "ll")),
+        ]
+    except AttributeError:
+        try:
+            seq = list(quad_obj)
+            if len(seq) >= 4:
+                corners = [_xy(seq[0]), _xy(seq[1]), _xy(seq[3]), _xy(seq[2])]
+        except (TypeError, ValueError):
+            corners = []
+
+    out = [_to_mm(x, y, page_h, flip_y, scale) for x, y in corners]
+    if len(out) >= 4:
+        out.append(out[0])
+    return out
+
+
 def extract_page(page, page_num: int, scale: float = 1.0,
                  flip_y: bool = True) -> PageData:
     """Extract normalized primitives from a PyMuPDF page."""
@@ -114,20 +161,13 @@ def extract_page(page, page_num: int, scale: float = 1.0,
                     pts = [_xy(d) for d in data]
                 else:
                     pts = _parse_cubic(data)
-                # Linearize cubic Bézier
                 p0 = _to_mm(pts[0][0], pts[0][1], page_h, flip_y, scale)
                 p1 = _to_mm(pts[1][0], pts[1][1], page_h, flip_y, scale)
                 p2 = _to_mm(pts[2][0], pts[2][1], page_h, flip_y, scale)
                 p3 = _to_mm(pts[3][0] if len(pts) > 3 else pts[2][0],
                             pts[3][1] if len(pts) > 3 else pts[2][1],
                             page_h, flip_y, scale)
-                if not current_pts:
-                    current_pts.append(p0)
-                N = max(4, min(32, int(math.ceil(_dist(p0, p3) / 0.5))))
-                for i in range(1, N + 1):
-                    t = i / float(N)
-                    q = _bezier_pt(p0, p1, p2, p3, t)
-                    current_pts.append(q)
+                _append_linearized_cubic(current_pts, p0, p1, p2, p3)
 
             elif kind == "re":
                 flush(False)
@@ -138,23 +178,37 @@ def extract_page(page, page_num: int, scale: float = 1.0,
                 c4 = _to_mm(x, y + h, page_h, flip_y, scale)
                 sub_paths.append(([c1, c2, c3, c4, c1], True))
 
+            elif kind == "qu":
+                flush(False)
+                quad = data[0] if data else None
+                pts = _quad_to_points(quad, page_h, flip_y, scale) if quad is not None else []
+                if len(pts) >= 5:
+                    sub_paths.append((pts, True))
+
             elif kind == "h":
                 flush(True)
 
             elif kind == "v":
-                if len(data) >= 2:
-                    cx, cy = _xy(data[0])
+                # PDF "v": c1 is current point, then (c2, end).
+                if len(data) >= 2 and current_pts:
+                    c2x, c2y = _xy(data[0])
                     ex, ey = _xy(data[1])
-                    ctrl = _to_mm(cx, cy, page_h, flip_y, scale)
-                    end = _to_mm(ex, ey, page_h, flip_y, scale)
-                    if current_pts:
-                        p0 = current_pts[-1]
-                        cp1 = (p0[0] + 2/3*(ctrl[0]-p0[0]), p0[1] + 2/3*(ctrl[1]-p0[1]))
-                        cp2 = (end[0] + 2/3*(ctrl[0]-end[0]), end[1] + 2/3*(ctrl[1]-end[1]))
-                        N = 8
-                        for i in range(1, N + 1):
-                            t = i / float(N)
-                            current_pts.append(_bezier_pt(p0, cp1, cp2, end, t))
+                    p0 = current_pts[-1]
+                    p1 = p0
+                    p2 = _to_mm(c2x, c2y, page_h, flip_y, scale)
+                    p3 = _to_mm(ex, ey, page_h, flip_y, scale)
+                    _append_linearized_cubic(current_pts, p0, p1, p2, p3)
+
+            elif kind == "y":
+                # PDF "y": (c1, end), c2 equals end.
+                if len(data) >= 2 and current_pts:
+                    c1x, c1y = _xy(data[0])
+                    ex, ey = _xy(data[1])
+                    p0 = current_pts[-1]
+                    p1 = _to_mm(c1x, c1y, page_h, flip_y, scale)
+                    p3 = _to_mm(ex, ey, page_h, flip_y, scale)
+                    p2 = p3
+                    _append_linearized_cubic(current_pts, p0, p1, p2, p3)
 
         flush(close_path)
 
@@ -216,7 +270,6 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
             dx = float(text_dir[0]) if text_dir else 1.0
             dy = float(text_dir[1]) if text_dir else 0.0
             angle = -math.degrees(math.atan2(dy, dx))
-
             for span in spans:
                 text = str(span.get("text", "")).strip()
                 if not text:
@@ -227,11 +280,15 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
                     x, y = float(origin[0]), float(origin[1])
                 else:
                     bb = span.get("bbox") or line.get("bbox", (0, 0, 0, 0))
-                    x, y = float(bb[0]), float(bb[3] if len(bb) >= 4 else bb[1])
+                    x = float(bb[0]) if len(bb) >= 1 else 0.0
+                    y = float(bb[3] if len(bb) >= 4 else (bb[1] if len(bb) >= 2 else 0.0))
 
                 px, py = _to_mm(x, y, page_h, flip_y, scale)
                 size = max(float(span.get("size", 3)), 1.0) * MM_PER_PT * scale
                 font = str(span.get("font", ""))
+
+                # Extract text color from span
+                text_color = _norm_color(span.get("color"))
 
                 bbox_mm = None
                 sb = span.get("bbox")
@@ -253,7 +310,7 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
                 items.append(NormalizedText(
                     id=next_id(), text=text, normalized=normalized,
                     insertion=(px, py), bbox=bbox_mm, font_size=size,
-                    rotation=angle, font_name=font,
+                    rotation=angle, font_name=font, color=text_color,
                     page_number=page_num, generic_tags=generic_tags
                 ))
     return items

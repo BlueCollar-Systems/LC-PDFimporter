@@ -113,6 +113,15 @@ def build_text(
         "rotation": rotation,
     }
 
+    # Apply source text color when available
+    text_color = getattr(text_item, "color", None)
+    if text_color is not None and not is_r12:
+        ri, gi, bi = (round(text_color[0] * 255),
+                      round(text_color[1] * 255),
+                      round(text_color[2] * 255))
+        from ezdxf.colors import rgb2int
+        attribs["true_color"] = rgb2int((ri, gi, bi))
+
     doc = msp.doc
 
     # Resolve text style (skip for R12 -- limited style support)

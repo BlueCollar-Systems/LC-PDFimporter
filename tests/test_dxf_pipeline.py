@@ -11,6 +11,8 @@ try:
 except ImportError:
     import fitz  # Legacy fallback
 
+from librecad_pdf_importer.core.PDFPrimitiveExtractor import extract_page
+from librecad_pdf_importer.core.document import ExtractionOptions, extract_document
 from librecad_pdf_importer.exporters.dxf_exporter import DxfExportOptions, export_to_dxf
 from librecad_pdf_importer.importer import run_import
 
@@ -93,6 +95,92 @@ class TestDxfPipeline(unittest.TestCase):
         self.assertTrue(Path(export.output_path).is_file())
         dxf = ezdxf.readfile(export.output_path)
         self.assertEqual(dxf.dxfversion, "AC1009")
+
+    def test_default_spread_stacks_pages_with_20_percent_gap(self) -> None:
+        run = run_import(str(self.pdf_path), preset="general")
+        page1 = run.extraction.pages[0].page_data
+        page2 = run.extraction.pages[1].page_data
+        page1_line = next(p for p in page1.primitives if p.type == "line" and len(p.points) == 2)
+        page2_line = next(p for p in page2.primitives if p.type == "line" and len(p.points) == 2)
+
+        export = export_to_dxf(
+            run.extraction,
+            str(self.dxf_path),
+            DxfExportOptions(include_images=False),
+        )
+
+        dxf = ezdxf.readfile(export.output_path)
+        page1_y = None
+        page2_y = None
+        for entity in dxf.modelspace():
+            if entity.dxftype() != "LINE":
+                continue
+            layer = str(entity.dxf.layer or "")
+            if page1_y is None and layer.startswith("P001"):
+                page1_y = float(entity.dxf.start.y)
+            elif page2_y is None and layer.startswith("P002"):
+                page2_y = float(entity.dxf.start.y)
+            if page1_y is not None and page2_y is not None:
+                break
+
+        self.assertIsNotNone(page1_y)
+        self.assertIsNotNone(page2_y)
+        expected_page1_y = float(page1_line.points[0][1])
+        expected_page2_y = float(page2_line.points[0][1] - (page1.height * 1.2))
+        self.assertAlmostEqual(page1_y, expected_page1_y, delta=0.1)
+        self.assertAlmostEqual(page2_y, expected_page2_y, delta=0.1)
+
+    def test_extract_page_handles_quad_path_items(self) -> None:
+        class _QuadPage:
+            rect = fitz.Rect(0, 0, 200, 200)
+
+            def get_drawings(self):
+                quad = fitz.Quad(
+                    fitz.Point(20, 20),
+                    fitz.Point(80, 20),
+                    fitz.Point(20, 60),
+                    fitz.Point(80, 60),
+                )
+                return [{
+                    "items": [("qu", quad)],
+                    "color": (0, 0, 0),
+                    "fill": None,
+                    "width": 1.0,
+                }]
+
+            def get_text(self, _kind):
+                return {"blocks": []}
+
+        page_data = extract_page(_QuadPage(), page_num=1, scale=1.0, flip_y=True)
+        self.assertEqual(len(page_data.primitives), 1)
+        self.assertTrue(page_data.primitives[0].closed)
+        self.assertGreaterEqual(len(page_data.primitives[0].points), 5)
+
+    def test_auto_mode_fill_art_prefers_raster(self) -> None:
+        fill_pdf = self.tmp_path / "fill_art.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=800, height=600)
+        for idx in range(430):
+            x = (idx % 43) * 18.0
+            y = (idx // 43) * 18.0
+            rect = fitz.Rect(x, y, x + 14.0, y + 14.0)
+            page.draw_rect(rect, color=None, fill=(0.2, 0.6, 0.2), width=0)
+        doc.save(str(fill_pdf))
+        doc.close()
+
+        extraction = extract_document(
+            str(fill_pdf),
+            ExtractionOptions(
+                pages="1",
+                import_mode="auto",
+                import_text=True,
+                import_images=True,
+            ),
+        )
+        summary = extraction.summary()
+        self.assertEqual(summary["pages"], 1)
+        self.assertEqual(summary["primitives"], 0)
+        self.assertGreaterEqual(summary["images"], 1)
 
 
 if __name__ == "__main__":

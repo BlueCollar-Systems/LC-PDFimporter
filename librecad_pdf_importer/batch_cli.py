@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dxf-version", default="R2018",
                    choices=["R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018"],
                    help="Target DXF version")
+    p.add_argument("--page-arrangement", default="spread",
+                   choices=["spread", "compact", "touch", "overlay"],
+                   help="Multi-page placement mode (default: spread = 20%% gap)")
+    p.add_argument("--page-gap-ratio", type=float, default=0.02,
+                   help="Gap ratio used when --page-arrangement=compact")
     p.add_argument("--recursive", action="store_true", help="Include subfolders")
     p.add_argument("--json", default=None, help="Write aggregate JSON report")
     return p
@@ -64,6 +69,8 @@ def main() -> int:
                     include_text=run.config.text_mode != "geometry",
                     include_images=True,
                     map_dashes=bool(run.config.map_dashes),
+                    page_arrangement=args.page_arrangement,
+                    page_gap_ratio=max(0.0, float(args.page_gap_ratio or 0.0)),
                 ),
             )
             aggregate["passed"] += 1

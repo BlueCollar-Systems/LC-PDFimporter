@@ -19,6 +19,23 @@ from .PDFPrimitives import PageData
 
 MM_PER_PT = 25.4 / 72.0
 
+# Auto-mode visual-fidelity heuristics (ported from host importers).
+AUTO_GLYPH_DRAWING_THRESHOLD = 1500
+AUTO_GLYPH_FILL_RATIO = 0.75
+AUTO_GLYPH_TINY_RECT_RATIO = 0.45
+AUTO_GLYPH_TEXT_BLOCK_THRESHOLD = 50
+AUTO_GLYPH_WORD_THRESHOLD = 400
+AUTO_GLYPH_STROKE_SPARSE_RATIO = 0.05
+
+AUTO_FILL_DRAWING_THRESHOLD = 400
+AUTO_FILL_HEAVY_RATIO = 0.60
+AUTO_FILL_STROKE_MAX = 0.22
+AUTO_FILL_PURE_RATIO = 0.95
+AUTO_FILL_PURE_STROKE_MAX = 0.02
+AUTO_FILL_PURE_MIN_GROUPS = 12
+AUTO_FILL_PURE_MIN_ITEMS = 24
+AUTO_FILL_PURE_LARGE_RECT_RATIO = 0.03
+
 
 @dataclass
 class ImagePlacement:
@@ -143,9 +160,23 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
         pages = parse_pages_spec(opts.pages, len(doc))
         for page_number in pages:
             page = doc.load_page(page_number - 1)
+            effective_mode = mode
+            if mode == "auto":
+                drawings = page.get_drawings()
+                text_blocks = page.get_text("blocks") or []
+                text_words = page.get_text("words") or []
+                auto_decision = _classify_auto_page(
+                    drawings,
+                    text_blocks_count=len(text_blocks),
+                    text_words_count=len(text_words),
+                    page_area=_rect_area(page.rect),
+                )
+                if auto_decision["type"] in {"glyph_flood", "fill_art", "raster_candidate"}:
+                    effective_mode = "raster"
+
             page_data = extract_page(page, page_number, scale=opts.scale, flip_y=opts.flip_y)
 
-            include_vectors = mode in {"auto", "vectors", "hybrid"}
+            include_vectors = effective_mode in {"auto", "vectors", "hybrid"}
             if include_vectors:
                 if opts.min_segment_mm > 0:
                     _prune_micro_segments(page_data, opts.min_segment_mm)
@@ -161,16 +192,25 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
                 page_data.primitives = []
                 page_data.text_items = []
 
+            if mode == "auto" and effective_mode != "raster" and opts.raster_fallback:
+                if _looks_like_text_cloud_page(len(page_data.primitives), len(page_data.text_items)):
+                    effective_mode = "raster"
+                elif _looks_like_page_frame_only(page_data):
+                    effective_mode = "raster"
+                if effective_mode == "raster":
+                    page_data.primitives = []
+                    page_data.text_items = []
+
             profile = profile_page(page_data)
             images = []
             if opts.import_images:
-                if mode in {"raster", "hybrid"}:
+                if effective_mode in {"raster", "hybrid"}:
                     rendered = _render_page_raster(page, page_number, opts, image_dir)
                     if rendered is not None:
                         images.append(rendered)
-                elif mode == "auto":
+                elif effective_mode == "auto":
                     images = _extract_images(doc, page, page_number, opts, image_dir)
-                    if opts.raster_fallback and not page_data.primitives and not images:
+                    if opts.raster_fallback and (not page_data.primitives or _looks_like_page_frame_only(page_data)) and not images:
                         rendered = _render_page_raster(page, page_number, opts, image_dir)
                         if rendered is not None:
                             images.append(rendered)
@@ -264,6 +304,139 @@ def _unwrap_angles(values: list[float]) -> list[float]:
     return unwrapped
 
 
+def _rect_area(rect) -> float:
+    try:
+        if rect is None:
+            return 0.0
+        if hasattr(rect, "width") and hasattr(rect, "height"):
+            return max(0.0, float(rect.width) * float(rect.height))
+        if len(rect) >= 4:
+            return max(0.0, abs(float(rect[2]) - float(rect[0])) * abs(float(rect[3]) - float(rect[1])))
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0
+
+
+def _classify_auto_page(
+    drawings: list[dict],
+    *,
+    text_blocks_count: int,
+    text_words_count: int,
+    page_area: float,
+) -> dict:
+    if not drawings:
+        return {"type": "raster_candidate", "reason": "No vector drawings."}
+
+    total = len(drawings)
+    has_fill = 0
+    has_stroke = 0
+    fill_only = 0
+    tiny_rects = 0
+    total_items = 0
+    max_rect_ratio = 0.0
+
+    for d in drawings:
+        f = d.get("fill")
+        s = d.get("color") or d.get("stroke")
+        if f is not None:
+            has_fill += 1
+        if s is not None:
+            has_stroke += 1
+        if f is not None and s is None:
+            fill_only += 1
+
+        items = d.get("items", []) or []
+        total_items += len(items)
+
+        rect = d.get("rect")
+        rect_area = _rect_area(rect)
+        if rect_area > 0 and page_area > 0:
+            max_rect_ratio = max(max_rect_ratio, rect_area / page_area)
+        if len(items) == 1 and items[0][0] == "re":
+            if rect_area <= 36.0:
+                tiny_rects += 1
+
+    fill_ratio = has_fill / float(max(total, 1))
+    stroke_ratio = has_stroke / float(max(total, 1))
+    fill_only_ratio = fill_only / float(max(total, 1))
+    tiny_rect_ratio = tiny_rects / float(max(total, 1))
+
+    if (
+        total >= AUTO_GLYPH_DRAWING_THRESHOLD
+        and fill_ratio >= AUTO_GLYPH_FILL_RATIO
+        and tiny_rect_ratio >= AUTO_GLYPH_TINY_RECT_RATIO
+        and stroke_ratio <= AUTO_GLYPH_STROKE_SPARSE_RATIO
+    ):
+        return {"type": "glyph_flood", "reason": "Dense filled glyph-like vectors."}
+
+    if (
+        total >= AUTO_GLYPH_DRAWING_THRESHOLD
+        and (text_blocks_count >= AUTO_GLYPH_TEXT_BLOCK_THRESHOLD or text_words_count >= AUTO_GLYPH_WORD_THRESHOLD)
+        and stroke_ratio <= AUTO_GLYPH_STROKE_SPARSE_RATIO
+        and fill_ratio >= AUTO_GLYPH_FILL_RATIO
+    ):
+        return {"type": "glyph_flood", "reason": "Text-dense glyph vector flood."}
+
+    if (
+        total >= AUTO_FILL_DRAWING_THRESHOLD
+        and fill_only_ratio >= AUTO_FILL_HEAVY_RATIO
+        and stroke_ratio <= AUTO_FILL_STROKE_MAX
+    ):
+        return {"type": "fill_art", "reason": "Fill-dominant decorative vectors."}
+
+    if (
+        fill_only_ratio >= AUTO_FILL_PURE_RATIO
+        and stroke_ratio <= AUTO_FILL_PURE_STROKE_MAX
+        and total >= AUTO_FILL_PURE_MIN_GROUPS
+        and (total_items >= AUTO_FILL_PURE_MIN_ITEMS or max_rect_ratio >= AUTO_FILL_PURE_LARGE_RECT_RATIO)
+    ):
+        return {"type": "fill_art", "reason": "Pure-fill decorative vectors."}
+
+    return {"type": "vectors", "reason": "Normal vector content."}
+
+
+def _looks_like_text_cloud_page(primitives_count: int, text_count: int) -> bool:
+    if text_count < 180:
+        return False
+    return (text_count / float(max(primitives_count, 1))) >= 2.5
+
+
+def _primitive_bbox_area_ratio(prim, page_area_mm2: float) -> float:
+    if page_area_mm2 <= 1e-9:
+        return 0.0
+    try:
+        if getattr(prim, "bbox", None):
+            x0, y0, x1, y1 = prim.bbox
+            return max(0.0, (abs(float(x1) - float(x0)) * abs(float(y1) - float(y0))) / page_area_mm2)
+    except (TypeError, ValueError):
+        return 0.0
+    try:
+        pts = list(getattr(prim, "points", []) or [])
+        if len(pts) >= 3:
+            xs = [float(p[0]) for p in pts]
+            ys = [float(p[1]) for p in pts]
+            return max(0.0, ((max(xs) - min(xs)) * (max(ys) - min(ys))) / page_area_mm2)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0
+
+
+def _looks_like_page_frame_only(page_data: PageData) -> bool:
+    prims = list(getattr(page_data, "primitives", []) or [])
+    if not prims or len(prims) > 12:
+        return False
+    text_count = len(list(getattr(page_data, "text_items", []) or []))
+    if text_count > 12:
+        return False
+    page_area = max(float(getattr(page_data, "width", 0.0) or 0.0) * float(getattr(page_data, "height", 0.0) or 0.0), 1.0)
+    big_frames = 0
+    for prim in prims:
+        ratio = _primitive_bbox_area_ratio(prim, page_area)
+        if ratio >= 0.88:
+            big_frames += 1
+    return big_frames >= 1
+
+
 def _extract_images(doc: fitz.Document, page: fitz.Page, page_number: int,
                     options: ExtractionOptions, image_dir: Optional[Path]) -> List[ImagePlacement]:
     placements: list[ImagePlacement] = []
@@ -350,3 +523,4 @@ def _render_page_raster(page: fitz.Page, page_number: int, options: ExtractionOp
         path=str(img_path),
         xref=-1,
     )
+

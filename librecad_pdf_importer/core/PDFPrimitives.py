@@ -49,6 +49,7 @@ class Primitive:
     stroke_color: Optional[Tuple[float, float, float]] = None
     fill_color: Optional[Tuple[float, float, float]] = None
     dash_pattern: Optional[list] = None
+    dash_phase: float = 0.0
     line_width: Optional[float] = None
     layer_name: Optional[str] = None
     closed: bool = False
@@ -67,6 +68,7 @@ class NormalizedText:
     font_size: float = 3.0 # mm
     rotation: float = 0.0  # degrees
     font_name: str = ""
+    color: Optional[Tuple[float, float, float]] = None  # RGB 0-1
     page_number: int = 0
     generic_tags: List[str] = field(default_factory=list)
     domain_tags: List[dict] = field(default_factory=list)

@@ -140,12 +140,13 @@ class ImportConfig:
     def shop_drawing(cls) -> "ImportConfig":
         """Shop Drawing — fabrication drawings (default)."""
         return cls(
-            curve_step_mm=0.5, join_tol=0.1, detect_arcs=True,
+            curve_step_mm=0.3, join_tol=0.1, detect_arcs=True,
             map_dashes=True, make_faces=True, import_text=True,
             text_mode="geometry", strict_text_fidelity=True,
             hatch_mode="group", import_mode="auto",
             cleanup_level="balanced", arc_mode="auto",
             lineweight_mode="preserve", grouping_mode="per_page",
+            arc_fit_tol_mm=0.05,
         )
 
     @classmethod

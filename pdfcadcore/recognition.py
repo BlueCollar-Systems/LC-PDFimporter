@@ -21,7 +21,7 @@ def run(page_data: PageData, mode: str = "auto", config: RecognitionConfig = Non
     generic = generic_rec.analyze(page_data, config)
 
     if mode == "auto":
-        profile = profiler.profile(page_data)
+        profile = generic.page_profile if generic else profiler.profile(page_data)
         effective = profile.primary_type if profile else "generic"
     else:
         effective = mode
