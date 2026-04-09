@@ -87,6 +87,48 @@ jobs:
             gh release create "$TAG" --title "$TITLE" --generate-notes --latest dist/*.zip
           fi
 
+      - name: Check website dispatch token secret
+        id: website_dispatch_token
+        env:
+          WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN || secrets.BLUECOLLAR_WEBSITE_DISPATCH_TOKEN || secrets.REPO_DISPATCH_TOKEN }}
+        run: |
+          if [ -n "$WEBSITE_DISPATCH_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch website release update
+        if: steps.website_dispatch_token.outputs.has_token == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.WEBSITE_DISPATCH_TOKEN || secrets.BLUECOLLAR_WEBSITE_DISPATCH_TOKEN || secrets.REPO_DISPATCH_TOKEN }}
+          script: |
+            const tag = 'v${{ steps.version.outputs.version }}';
+            const payload = {
+              source_repo: context.repo.owner + '/' + context.repo.repo,
+              source_event: 'auto-release',
+              source_ref: context.ref,
+              source_sha: context.sha,
+              release_tag: tag,
+              release_name: tag,
+              release_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`,
+            };
+
+            await github.request('POST /repos/{owner}/{repo}/dispatches', {
+              owner: 'BlueCollar-Systems',
+              repo: 'BlueCollar-Website',
+              event_type: 'product-release',
+              client_payload: payload,
+            });
+
+            core.info('Dispatched product-release to BlueCollar-Website');
+
+      - name: Warn when website dispatch token is missing
+        if: steps.website_dispatch_token.outputs.has_token != 'true'
+        run: |
+          echo "::warning::Skipping website dispatch because no valid dispatch token secret is configured."
+          echo "Set WEBSITE_DISPATCH_TOKEN (or BLUECOLLAR_WEBSITE_DISPATCH_TOKEN / REPO_DISPATCH_TOKEN) to enable cross-repo dispatch."
       - name: Create version bump pull request
         id: create_pr
         continue-on-error: true
@@ -122,3 +164,4 @@ jobs:
         run: |
           echo "::warning::Version bump branch was pushed, but this repo currently blocks GitHub Actions from creating pull requests."
           echo "::warning::Enable 'Allow GitHub Actions to create and approve pull requests' or create the PR manually from branch automation/version-bump-v${{ steps.version.outputs.version }}."
+

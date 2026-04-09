@@ -1,10 +1,6 @@
 name: notify-website-deploy
 
 on:
-  push:
-    branches:
-      - main
-      - master
   release:
     types:
       - published
@@ -40,17 +36,18 @@ jobs:
         with:
           github-token: ${{ secrets.WEBSITE_DISPATCH_TOKEN || secrets.BLUECOLLAR_WEBSITE_DISPATCH_TOKEN || secrets.REPO_DISPATCH_TOKEN }}
           script: |
-            const isRelease = context.eventName === 'release';
-            const eventType = isRelease ? 'product-release' : 'product-update';
+            const release = context.payload?.release ?? null;
             const payload = {
               source_repo: context.repo.owner + '/' + context.repo.repo,
               source_event: context.eventName,
               source_ref: context.ref,
               source_sha: context.sha,
-              release_tag: context.payload?.release?.tag_name ?? null,
-              release_name: context.payload?.release?.name ?? null,
-              release_url: context.payload?.release?.html_url ?? null,
+              release_tag: release?.tag_name ?? null,
+              release_name: release?.name ?? null,
+              release_url: release?.html_url ?? null,
             };
+
+            const eventType = payload.release_tag ? 'product-release' : 'product-update';
 
             await github.request('POST /repos/{owner}/{repo}/dispatches', {
               owner: 'BlueCollar-Systems',
