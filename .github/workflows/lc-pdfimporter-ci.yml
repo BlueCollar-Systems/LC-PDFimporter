@@ -58,5 +58,53 @@ jobs:
           cd pdfcadcore
           python -m pytest tests/ -v || echo "No tests yet"
 
+      - name: Run unit tests
+        run: python -m pytest tests/ -v
+
       - name: Verify CLI help
         run: python pdf2dxf.py --help
+
+      - name: Preset matrix smoke test
+        run: |
+          python -c "
+          import sys, math
+          sys.path.insert(0, '.')
+          from librecad_pdf_importer.importer import run_import
+          import fitz, tempfile, os
+
+          # Build a mixed-content sample PDF
+          tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+          doc = fitz.open()
+          p = doc.new_page(width=612, height=792)
+          p.draw_line((50,50),(300,50), color=(0,0,0), width=1)
+          p.draw_circle((200,400), 30, color=(1,0,0), width=0.5)
+          for i in range(8):
+              a = 2*math.pi*i/8
+              x, y = 400+25*math.cos(a), 300+25*math.sin(a)
+              p.draw_line((400,300),(x,y), color=(0,0,1), width=0.3)
+          tw = fitz.TextWriter(p.rect)
+          tw.append((100,700), 'BOLT 3/4\" DIA', fontsize=12)
+          tw.write_text(p)
+          p2 = doc.new_page(width=612, height=792)
+          p2.draw_rect((50,50,560,740), color=(0,0,0), width=0.5)
+          doc.save(tmp.name)
+          doc.close()
+
+          presets = ['fast', 'general', 'technical', 'shop', 'max']
+          modes = ['auto', 'vectors', 'raster', 'hybrid']
+          errors = []
+          for preset in presets:
+              for mode in modes:
+                  try:
+                      r = run_import(tmp.name, preset=preset,
+                                     overrides={'pages': 'all', 'import_mode': mode})
+                      s = r.extraction.summary()
+                  except Exception as e:
+                      errors.append(f'{preset}/{mode}: {e}')
+
+          os.unlink(tmp.name)
+          if errors:
+              for e in errors: print(f'FAIL: {e}')
+              sys.exit(1)
+          print(f'PASS: {len(presets)*len(modes)} preset/mode combos verified')
+          "

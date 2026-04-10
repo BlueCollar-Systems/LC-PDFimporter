@@ -130,6 +130,55 @@ class TestDxfPipeline(unittest.TestCase):
         self.assertAlmostEqual(page1_y, expected_page1_y, delta=0.1)
         self.assertAlmostEqual(page2_y, expected_page2_y, delta=0.1)
 
+    def test_multipage_no_geometry_overlap(self) -> None:
+        """Verify geometry from page 1 and page 2 occupy non-overlapping Y bands."""
+        run = run_import(str(self.pdf_path), preset="general")
+        export = export_to_dxf(
+            run.extraction,
+            str(self.dxf_path),
+            DxfExportOptions(include_images=False),
+        )
+        dxf = ezdxf.readfile(export.output_path)
+
+        # Collect Y extents per page layer
+        page_y_bands: dict[str, list[float]] = {}
+        for entity in dxf.modelspace():
+            layer = str(entity.dxf.layer or "")
+            # Extract page number from layer name (P001_*, P002_*, etc.)
+            page_key = layer[:4] if layer.startswith("P0") else None
+            if page_key is None:
+                continue
+            ys = []
+            if entity.dxftype() == "LINE":
+                ys = [entity.dxf.start.y, entity.dxf.end.y]
+            elif entity.dxftype() == "LWPOLYLINE":
+                ys = [pt[1] for pt in entity.get_points()]
+            elif entity.dxftype() in ("CIRCLE", "ARC"):
+                c = entity.dxf.center
+                r = entity.dxf.radius
+                ys = [c.y - r, c.y + r]
+            if ys:
+                page_y_bands.setdefault(page_key, []).extend(ys)
+
+        # Must have at least 2 pages
+        self.assertGreaterEqual(len(page_y_bands), 2, "Expected 2+ page layers")
+
+        # Verify no overlap between consecutive pages
+        sorted_pages = sorted(page_y_bands.keys())
+        for i in range(len(sorted_pages) - 1):
+            p1 = sorted_pages[i]
+            p2 = sorted_pages[i + 1]
+            p1_min = min(page_y_bands[p1])
+            p1_max = max(page_y_bands[p1])
+            p2_min = min(page_y_bands[p2])
+            p2_max = max(page_y_bands[p2])
+            # Page 2 should be entirely below page 1 (negative Y direction)
+            self.assertLess(
+                p2_max, p1_min,
+                f"Page overlap detected: {p1} Y=[{p1_min:.1f},{p1_max:.1f}] "
+                f"vs {p2} Y=[{p2_min:.1f},{p2_max:.1f}]"
+            )
+
     def test_extract_page_handles_quad_path_items(self) -> None:
         class _QuadPage:
             rect = fitz.Rect(0, 0, 200, 200)
