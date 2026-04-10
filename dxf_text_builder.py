@@ -114,7 +114,7 @@ def build_text(
     }
 
     # Apply source text color when available
-    text_color = getattr(text_item, "color", None)
+    text_color = text_item.color
     if text_color is not None and not is_r12:
         ri, gi, bi = (round(text_color[0] * 255),
                       round(text_color[1] * 255),

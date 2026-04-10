@@ -111,7 +111,7 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                     "insert": (float(text.insertion[0]), float(text.insertion[1]) + dy),
                 }
                 # Apply source text color when available
-                text_color = getattr(text, "color", None)
+                text_color = text.color
                 if text_color is not None:
                     ri = round(text_color[0] * 255)
                     gi = round(text_color[1] * 255)
