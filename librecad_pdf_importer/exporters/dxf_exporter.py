@@ -220,7 +220,14 @@ def _ensure_layer(doc: ezdxf.EzDxf, name: str, rgb) -> None:
 def _apply_color(attribs: dict, rgb) -> None:
     if rgb is None:
         return
-    attribs["true_color"] = rgb2int(tuple(int(max(0, min(255, round(float(c) * 255)))) for c in rgb))
+    r, g, b = (int(max(0, min(255, round(float(c) * 255)))) for c in rgb)
+    # Invert near-white colors to black so geometry is visible on
+    # LibreCAD's default white background.  Without this, white-on-white
+    # entities are invisible and the user sees a blank/black screen.
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    if luminance > 230:
+        r, g, b = 0, 0, 0
+    attribs["true_color"] = rgb2int((r, g, b))
 
 
 def _apply_lineweight(attribs: dict, width_pt) -> None:
