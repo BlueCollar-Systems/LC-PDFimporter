@@ -51,7 +51,7 @@ jobs:
         run: ruff check --select F,B pdf2dxf.py dxf_builder.py dxf_text_builder.py dxf_import_engine.py gui.py pdfcadcore/
 
       - name: Install dependencies
-        run: pip install "PyMuPDF>=1.24,<2.0" ezdxf
+        run: pip install "PyMuPDF>=1.24,<2.0" ezdxf pytest
 
       - name: Run pdfcadcore unit tests
         run: |
