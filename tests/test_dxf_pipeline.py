@@ -179,6 +179,26 @@ class TestDxfPipeline(unittest.TestCase):
                 f"vs {p2} Y=[{p2_min:.1f},{p2_max:.1f}]"
             )
 
+    def test_export_sets_extents_and_modelspace_vport(self) -> None:
+        run = run_import(str(self.pdf_path), preset="general")
+        export = export_to_dxf(
+            run.extraction,
+            str(self.dxf_path),
+            DxfExportOptions(include_images=False),
+        )
+
+        dxf = ezdxf.readfile(export.output_path)
+        msp = dxf.modelspace()
+        extmin = tuple(float(v) for v in msp.dxf.extmin)
+        extmax = tuple(float(v) for v in msp.dxf.extmax)
+        self.assertLess(extmin[0], extmax[0])
+        self.assertLess(extmin[1], extmax[1])
+
+        active = dxf.viewports.get("*Active")
+        self.assertTrue(active)
+        vp = active[0]
+        self.assertGreater(float(vp.dxf.height), 0.0)
+
     def test_extract_page_handles_quad_path_items(self) -> None:
         class _QuadPage:
             rect = fitz.Rect(0, 0, 200, 200)

@@ -81,10 +81,12 @@ def build(output_dir: str | None = None) -> Path:
             if _should_include(rel):
                 files_to_add.append((item, rel))
 
-    # Walk pdfcadcore/
-    pdfcadcore_dir = _PROJECT_ROOT / "pdfcadcore"
-    if pdfcadcore_dir.is_dir():
-        for root, _dirs, filenames in os.walk(pdfcadcore_dir):
+    # Walk package directories
+    for package_dir_name in ("pdfcadcore", "librecad_pdf_importer"):
+        package_dir = _PROJECT_ROOT / package_dir_name
+        if not package_dir.is_dir():
+            continue
+        for root, _dirs, filenames in os.walk(package_dir):
             for fname in filenames:
                 full = Path(root) / fname
                 rel = full.relative_to(_PROJECT_ROOT).as_posix()

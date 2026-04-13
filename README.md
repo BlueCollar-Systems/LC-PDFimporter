@@ -40,6 +40,7 @@ Evidence levels:
 
 ```
 pip install -r requirements.txt
+pip install -e .
 ```
 
 ## CLI Usage
@@ -102,6 +103,11 @@ Launch the graphical interface:
 python pdf2dxf.py --gui
 ```
 
+Installed entrypoint:
+```
+lcpdf-gui
+```
+
 Or run the GUI directly:
 ```
 python gui.py
@@ -116,6 +122,11 @@ Convert an entire directory tree of PDFs to DXF:
 
 ```
 python -m librecad_pdf_importer.batch_cli "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --preset technical --pages all --json batch_report.json
+```
+
+Installed entrypoint:
+```
+lcpdf-batch "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --preset technical --pages all
 ```
 
 ## QA Smoke Harness

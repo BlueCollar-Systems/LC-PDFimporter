@@ -211,6 +211,10 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
     if min_x <= max_x and min_y <= max_y:
         extmin = (float(min_x), float(min_y), 0.0)
         extmax = (float(max_x), float(max_y), 0.0)
+        msp.dxf.extmin = extmin
+        msp.dxf.extmax = extmax
+        msp.dxf.limmin = (float(min_x), float(min_y))
+        msp.dxf.limmax = (float(max_x), float(max_y))
         doc.header["$EXTMIN"] = extmin
         doc.header["$EXTMAX"] = extmax
         doc.header["$LIMMIN"] = (float(min_x), float(min_y))
