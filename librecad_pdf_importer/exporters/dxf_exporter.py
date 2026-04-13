@@ -46,7 +46,9 @@ class DxfExportResult:
 def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                   options: Optional[DxfExportOptions] = None) -> DxfExportResult:
     opts = options or DxfExportOptions()
-    doc = ezdxf.new(_normalize_dxf_version(opts.dxf_version))
+    dxf_ver = _normalize_dxf_version(opts.dxf_version)
+    is_r12 = dxf_ver == "R12"
+    doc = ezdxf.new(dxf_ver)
     doc.units = MM
     msp = doc.modelspace()
 
@@ -62,16 +64,40 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
         arrangement = "spread"
     gap_ratio = max(0.0, float(opts.page_gap_ratio or 0.0))
 
+    # Export extents for host auto-framing (LibreCAD/QCAD/AutoCAD).
+    min_x = float("inf")
+    min_y = float("inf")
+    max_x = float("-inf")
+    max_y = float("-inf")
+
+    def _track_xy(x: float, y: float) -> None:
+        nonlocal min_x, min_y, max_x, max_y
+        if x < min_x:
+            min_x = x
+        if y < min_y:
+            min_y = y
+        if x > max_x:
+            max_x = x
+        if y > max_y:
+            max_y = y
+
     for page in extraction.pages:
         # Apply page stacking offset to all coordinates
         dy = _stack_offset_y
+        page_w = float(page.page_data.width or 0.0)
+        page_h = float(page.page_data.height or 0.0)
+        # Seed extents from the page frame so host auto-fit still works even
+        # when selected export mode yields no drawable entities on that page.
+        _track_xy(0.0, 0.0 + dy)
+        _track_xy(page_w, page_h + dy)
 
         for primitive in page.page_data.primitives:
             layer = _layer_name(page.page_data.page_number, primitive.layer_name, primitive.stroke_color, opts)
             _ensure_layer(doc, layer, primitive.stroke_color)
             attribs = {"layer": layer}
-            _apply_color(attribs, primitive.stroke_color)
-            _apply_lineweight(attribs, primitive.line_width)
+            if not is_r12:
+                _apply_color(attribs, primitive.stroke_color)
+                _apply_lineweight(attribs, primitive.line_width)
 
             if opts.map_dashes:
                 ltype = _linetype_from_dash(doc, primitive.dash_pattern, dash_cache)
@@ -83,21 +109,35 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                 return (pt[0], pt[1] + dy)
 
             if primitive.type == "line" and primitive.points and len(primitive.points) == 2:
-                msp.add_line(_ofs(primitive.points[0]), _ofs(primitive.points[1]), dxfattribs=attribs)
+                start = _ofs(primitive.points[0])
+                end = _ofs(primitive.points[1])
+                msp.add_line(start, end, dxfattribs=attribs)
+                _track_xy(float(start[0]), float(start[1]))
+                _track_xy(float(end[0]), float(end[1]))
                 entity_count += 1
             elif primitive.type == "circle" and primitive.center and primitive.radius:
-                msp.add_circle(_ofs(primitive.center), primitive.radius, dxfattribs=attribs)
+                center = _ofs(primitive.center)
+                radius = float(primitive.radius)
+                msp.add_circle(center, radius, dxfattribs=attribs)
+                _track_xy(float(center[0]) - radius, float(center[1]) - radius)
+                _track_xy(float(center[0]) + radius, float(center[1]) + radius)
                 entity_count += 1
             elif primitive.type == "arc" and primitive.center and primitive.radius:
                 start = float(primitive.start_angle or 0.0)
                 end = float(primitive.end_angle or 0.0)
                 if math.isclose(start, end, abs_tol=1e-6):
                     end = (end + 359.999) % 360.0
-                msp.add_arc(_ofs(primitive.center), primitive.radius, start, end, dxfattribs=attribs)
+                center = _ofs(primitive.center)
+                radius = float(primitive.radius)
+                msp.add_arc(center, radius, start, end, dxfattribs=attribs)
+                _track_xy(float(center[0]) - radius, float(center[1]) - radius)
+                _track_xy(float(center[0]) + radius, float(center[1]) + radius)
                 entity_count += 1
             elif primitive.points and len(primitive.points) >= 2:
                 offset_pts = [_ofs(p) for p in primitive.points]
                 msp.add_lwpolyline(offset_pts, format="xy", close=bool(primitive.closed), dxfattribs=attribs)
+                for px, py in offset_pts:
+                    _track_xy(float(px), float(py))
                 entity_count += 1
 
         if opts.include_text:
@@ -110,17 +150,23 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                     "rotation": float(text.rotation or 0.0),
                     "insert": (float(text.insertion[0]), float(text.insertion[1]) + dy),
                 }
-                # Apply source text color when available
-                text_color = text.color
-                if text_color is not None:
-                    ri = round(text_color[0] * 255)
-                    gi = round(text_color[1] * 255)
-                    bi = round(text_color[2] * 255)
-                    text_attribs["true_color"] = rgb2int((ri, gi, bi))
+                # Apply source text color when available (R12 lacks true_color)
+                if not is_r12:
+                    text_color = text.color
+                    if text_color is not None:
+                        ri = round(text_color[0] * 255)
+                        gi = round(text_color[1] * 255)
+                        bi = round(text_color[2] * 255)
+                        text_attribs["true_color"] = rgb2int((ri, gi, bi))
                 txt = msp.add_text(
                     text.text,
                     dxfattribs=text_attribs,
                 )
+                _track_xy(float(text_attribs["insert"][0]), float(text_attribs["insert"][1]))
+                if text.bbox:
+                    x0, y0, x1, y1 = text.bbox
+                    _track_xy(float(x0), float(y0) + dy)
+                    _track_xy(float(x1), float(y1) + dy)
                 if opts.attach_metadata:
                     txt.set_xdata("BC_PDF", [
                         (1000, f"text_id={text.id}"),
@@ -152,20 +198,26 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                     size_in_units=(placement.width_mm, placement.height_mm),
                     dxfattribs={"layer": layer},
                 )
+                _track_xy(float(placement.x_mm), float(placement.y_mm) + dy)
+                _track_xy(float(placement.x_mm + placement.width_mm), float(placement.y_mm + placement.height_mm) + dy)
                 entity_count += 1
                 image_count += 1
 
         # Advance page placement offset for the next page.
-        if arrangement == "overlay":
-            continue
-        if arrangement == "spread":
-            step = page.page_data.height * 1.2
-        elif arrangement == "touch":
-            step = page.page_data.height
-        else:
-            # Compact stacking keeps pages readable without large gaps.
-            step = page.page_data.height * (1.0 + gap_ratio)
-        _stack_offset_y -= step
+        page_step = _page_stack_step(page.page_data.height, arrangement, gap_ratio)
+        _stack_offset_y -= page_step
+
+    # Persist extents + initial modelspace viewport so hosts open focused on geometry.
+    if min_x <= max_x and min_y <= max_y:
+        extmin = (float(min_x), float(min_y), 0.0)
+        extmax = (float(max_x), float(max_y), 0.0)
+        doc.header["$EXTMIN"] = extmin
+        doc.header["$EXTMAX"] = extmax
+        doc.header["$LIMMIN"] = (float(min_x), float(min_y))
+        doc.header["$LIMMAX"] = (float(max_x), float(max_y))
+        center = ((float(min_x) + float(max_x)) * 0.5, (float(min_y) + float(max_y)) * 0.5)
+        height = max(1.0, float(max_y) - float(min_y))
+        doc.set_modelspace_vport(height * 1.1, center=center)
 
     output = Path(output_path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -195,6 +247,17 @@ def _normalize_dxf_version(raw: str) -> str:
     allowed = {"R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018"}
     normalized = (raw or "R2018").strip().upper()
     return normalized if normalized in allowed else "R2018"
+
+
+def _page_stack_step(page_height: float, arrangement: str, gap_ratio: float) -> float:
+    h = max(1.0, float(page_height or 0.0))
+    if arrangement == "overlay":
+        return 0.0
+    if arrangement == "touch":
+        return h
+    if arrangement == "compact":
+        return h * (1.0 + max(0.0, gap_ratio))
+    return h * 1.2
 
 
 def _sanitize_layer(name: str) -> str:
