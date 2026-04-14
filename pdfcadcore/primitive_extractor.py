@@ -370,7 +370,235 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
                     color=text_color,
                     page_number=page_num, generic_tags=generic_tags
                 ))
+    items = _merge_stacked_fractions(items)
     return items
+
+
+# ── Stacked-fraction merger ──
+# Some CAD PDFs encode fractions like "15/16" as three separate text spans
+# stacked vertically: numerator, slash, denominator.  This post-processor
+# detects unambiguous stacked-fraction groups and merges them into a single
+# NormalizedText so downstream importers see e.g. "15/16" instead of three
+# overlapping items.
+
+_SLASH_RE = re.compile(r'^[/\u2044\u2215]$')   # slash, fraction slash, division slash
+_DIGITS_RE = re.compile(r'^\d{1,4}$')           # 1-4 digit number
+# Concatenated numerator+denominator: e.g. "716" = 7/16, "1116" = 11/16.
+# Valid denominators for imperial fractions.
+_VALID_DENOMS = (2, 4, 8, 16, 32, 64)
+
+# Thresholds (mm).  5 pt ≈ 1.76 mm, 6 pt ≈ 2.12 mm.
+_FRAC_X_OVERLAP_MM = 5.0   # max horizontal gap between items to consider co-located
+_FRAC_Y_SPREAD_MM = 4.5    # max total vertical spread for the whole group
+
+
+def _split_concatenated_fraction(digits: str):
+    """Try to split a concatenated digit string into (numerator, denominator).
+
+    E.g. "716" -> ("7", "16"), "1116" -> ("11", "16"), "316" -> ("3", "16").
+    Returns None if no valid split is found.
+    """
+    s = digits.strip()
+    if not s.isdigit() or len(s) < 2:
+        return None
+    # Try splitting: denominator is a known fraction denominator at the end
+    for d in sorted(_VALID_DENOMS, reverse=True):
+        ds = str(d)
+        if len(s) > len(ds) and s.endswith(ds):
+            numer = s[:-len(ds)]
+            if numer.isdigit():
+                n = int(numer)
+                # Numerator must be less than denominator for a proper fraction
+                if 0 < n < d:
+                    return (numer, ds)
+    return None
+
+
+def _merge_stacked_fractions(items: List[NormalizedText]) -> List[NormalizedText]:
+    """Merge stacked fraction spans into one.
+
+    Handles two PDF encoding patterns:
+    1. Two items: concatenated digits + "/" (e.g. "716" + "/" -> "7/16")
+       This is the most common pattern in CAD PDFs.
+    2. Three items: separate numerator + "/" + denominator (e.g. "15", "/", "16")
+       Only matched when neither digit item is itself a concatenated fraction.
+    """
+    if len(items) < 2:
+        return items
+
+    # Group candidates by page
+    by_page: dict[int, list[int]] = {}
+    for idx, it in enumerate(items):
+        by_page.setdefault(it.page_number, []).append(idx)
+
+    merged_indices: set[int] = set()
+    replacements: dict[int, NormalizedText] = {}  # keyed by slash index
+
+    for page_num, indices in by_page.items():
+        # Find slash items on this page
+        slash_idxs = [i for i in indices if _SLASH_RE.match(items[i].text.strip())]
+
+        for si in slash_idxs:
+            if si in merged_indices:
+                continue
+            slash = items[si]
+            sx = slash.insertion[0]
+            sy = slash.insertion[1]
+
+            # ----------------------------------------------------------
+            # Pattern A: Concatenated digits + slash (e.g. "716" + "/")
+            # Try this FIRST — it is the most common and unambiguous.
+            # ----------------------------------------------------------
+            concat_candidates = []
+            for ci in indices:
+                if ci == si or ci in merged_indices:
+                    continue
+                cand = items[ci]
+                ct = cand.text.strip()
+                if not ct.isdigit() or len(ct) < 2:
+                    continue
+                cx = cand.insertion[0]
+                cy = cand.insertion[1]
+                if abs(cx - sx) > _FRAC_X_OVERLAP_MM:
+                    continue
+                if abs(cy - sy) > _FRAC_Y_SPREAD_MM:
+                    continue
+                split = _split_concatenated_fraction(ct)
+                if split is not None:
+                    concat_candidates.append((ci, split))
+
+            if len(concat_candidates) == 1:
+                ci, (numer_s, denom_s) = concat_candidates[0]
+                cand = items[ci]
+                sizes = [cand.font_size, slash.font_size]
+                if max(sizes) <= 2.0 * min(sizes):
+                    merged_text = f"{numer_s}/{denom_s}"
+                    avg_size = sum(sizes) / 2.0
+                    merged_item = NormalizedText(
+                        id=next_id(),
+                        text=merged_text,
+                        normalized=merged_text.upper().strip(),
+                        insertion=slash.insertion,
+                        bbox=_merged_bbox(cand.bbox, slash.bbox),
+                        font_size=avg_size,
+                        rotation=slash.rotation,
+                        font_name=slash.font_name or cand.font_name,
+                        color=slash.color or cand.color,
+                        page_number=page_num,
+                        generic_tags=_classify_generic(merged_text),
+                    )
+                    merged_indices.update([ci, si])
+                    replacements[si] = merged_item
+                    continue
+
+            # ----------------------------------------------------------
+            # Pattern B: Three separate items (numerator + slash + denom)
+            # Only if Pattern A didn't match. Require that neither digit
+            # is itself a concatenated fraction (to avoid grabbing whole
+            # numbers that sit next to an already-handled concat fraction).
+            # ----------------------------------------------------------
+            digit_candidates = []
+            for ci in indices:
+                if ci == si or ci in merged_indices:
+                    continue
+                cand = items[ci]
+                ct = cand.text.strip()
+                if not _DIGITS_RE.match(ct):
+                    continue
+                # Skip items that are concatenated fractions — those belong
+                # to Pattern A with a different slash.
+                if len(ct) >= 2 and _split_concatenated_fraction(ct) is not None:
+                    continue
+                cx = cand.insertion[0]
+                cy = cand.insertion[1]
+                if abs(cx - sx) > _FRAC_X_OVERLAP_MM:
+                    continue
+                if abs(cy - sy) > _FRAC_Y_SPREAD_MM:
+                    continue
+                digit_candidates.append(ci)
+
+            if len(digit_candidates) >= 2:
+                # Try all pairs to find a valid numerator/denominator.
+                # Sort by closeness to slash Y so we prefer the tightest pair.
+                digit_candidates.sort(key=lambda i: abs(items[i].insertion[1] - sy))
+                best_pair = None
+                best_spread = _FRAC_Y_SPREAD_MM + 1
+                for ai in range(len(digit_candidates)):
+                    for bi in range(ai + 1, len(digit_candidates)):
+                        ca, cb = digit_candidates[ai], digit_candidates[bi]
+                        ya = items[ca].insertion[1]
+                        yb = items[cb].insertion[1]
+                        spread = abs(ya - yb)
+                        if spread > _FRAC_Y_SPREAD_MM or spread < 0.3:
+                            continue
+                        try:
+                            va = int(items[ca].text.strip())
+                            vb = int(items[cb].text.strip())
+                        except ValueError:
+                            continue
+                        if va < vb:
+                            ni, di = ca, cb
+                        elif vb < va:
+                            ni, di = cb, ca
+                        else:
+                            continue
+                        d_val = int(items[di].text.strip())
+                        n_val = int(items[ni].text.strip())
+                        if d_val not in _VALID_DENOMS or n_val >= d_val:
+                            continue
+                        if spread < best_spread:
+                            best_spread = spread
+                            best_pair = (ni, di)
+                if best_pair is None:
+                    continue
+                numer_idx, denom_idx = best_pair
+                numer = items[numer_idx]
+                denom = items[denom_idx]
+                sizes = [numer.font_size, slash.font_size, denom.font_size]
+                if max(sizes) <= 2.0 * min(sizes):
+                    merged_text = f"{numer.text.strip()}/{denom.text.strip()}"
+                    avg_size = sum(sizes) / 3.0
+                    merged_item = NormalizedText(
+                        id=next_id(),
+                        text=merged_text,
+                        normalized=merged_text.upper().strip(),
+                        insertion=slash.insertion,
+                        bbox=_merged_bbox(numer.bbox, slash.bbox, denom.bbox),
+                        font_size=avg_size,
+                        rotation=slash.rotation,
+                        font_name=slash.font_name or numer.font_name,
+                        color=slash.color or numer.color,
+                        page_number=page_num,
+                        generic_tags=_classify_generic(merged_text),
+                    )
+                    merged_indices.update([numer_idx, si, denom_idx])
+                    replacements[si] = merged_item
+
+    if not merged_indices:
+        return items
+
+    # Rebuild list: keep non-merged items, insert merged items at slash position
+    result = []
+    for idx, it in enumerate(items):
+        if idx in merged_indices:
+            if idx in replacements:
+                result.append(replacements[idx])
+            # else: skip (numerator or denominator that was merged)
+        else:
+            result.append(it)
+    return result
+
+
+def _merged_bbox(*boxes):
+    """Return the union bounding box of one or more (x0,y0,x1,y1) or None boxes."""
+    vals = [b for b in boxes if b is not None]
+    if not vals:
+        return None
+    x0 = min(b[0] for b in vals)
+    y0 = min(b[1] for b in vals)
+    x1 = max(b[2] for b in vals)
+    y1 = max(b[3] for b in vals)
+    return (x0, y0, x1, y1)
 
 
 def _classify_generic(text: str) -> list:

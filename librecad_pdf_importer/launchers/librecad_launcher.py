@@ -34,6 +34,21 @@ def launch_librecad(dxf_path: str, executable: Optional[str] = None) -> Tuple[bo
         return False, "LibreCAD executable not found."
 
     dxf = str(Path(dxf_path).expanduser().resolve())
+
+    # Kill any existing LibreCAD instances first — if LC is already running,
+    # passing a file arg to a new process often fails silently (the new process
+    # exits and tries IPC to the existing instance, which may not work).
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/f", "/im", "librecad.exe"],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
+    import time
+    time.sleep(0.5)
+
     try:
         subprocess.Popen([exe, dxf])
         return True, f"Launched LibreCAD: {exe}"

@@ -4,27 +4,40 @@ This tool converts PDF drawings to DXF files that you can open in LibreCAD, Auto
 
 ## Quick Start
 
-### Option 1: Command Line (fastest)
+### Option 1: LibreCAD Plugins menu (recommended)
+1. Build/install plugin:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\plugin\build_install_lcpdf_menu.ps1
+```
+2. Restart LibreCAD
+3. Use `Plugins > PDF Importer (BlueCollar)...`
+
+### Option 2: Command Line (fastest)
 ```bash
 python pdf2dxf.py "C:\path\to\drawing.pdf" "C:\output\drawing.dxf"
 ```
 
-### Option 2: GUI Window
+### Option 3: GUI Window (no terminal required)
 ```bash
 python gui.py
 ```
-A window opens where you can browse for a PDF, choose presets, and export.
+A window opens where you can browse for a PDF, choose presets, export, and
+auto-open the DXF in LibreCAD.
 
-### Option 3: Batch Convert (multiple files)
+### Option 3b: Double-click launcher (Windows, no terminal)
+- Double-click `launch_lcpdf_gui.pyw`
+- Or install entrypoint and run `lcpdf-guiw`
+
+### Option 4: Batch Convert (multiple files)
 ```bash
 python -m librecad_pdf_importer.batch_cli "C:\folder\with\pdfs"
 ```
 
 ## After Converting
 
-1. Open LibreCAD
-2. File > Open > select your .dxf file
-3. The drawing should auto-zoom to fit
+1. In the GUI, keep `Open in LibreCAD after convert` enabled
+2. Click `Convert`
+3. LibreCAD opens automatically with the generated DXF
 
 ## Presets
 

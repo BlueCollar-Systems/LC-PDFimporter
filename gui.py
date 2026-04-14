@@ -148,6 +148,7 @@ class Pdf2DxfApp(tk.Tk):
         self._var_detect_arcs = tk.BooleanVar(value=True)
         self._var_map_dashes = tk.BooleanVar(value=True)
         self._var_make_faces = tk.BooleanVar(value=True)
+        self._var_launch_librecad = tk.BooleanVar(value=True)
 
         ttk.Checkbutton(opts_frame, text="Import text",
                         variable=self._var_import_text).pack(side=tk.LEFT, padx=6)
@@ -157,6 +158,8 @@ class Pdf2DxfApp(tk.Tk):
                         variable=self._var_map_dashes).pack(side=tk.LEFT, padx=6)
         ttk.Checkbutton(opts_frame, text="Make faces",
                         variable=self._var_make_faces).pack(side=tk.LEFT, padx=6)
+        ttk.Checkbutton(opts_frame, text="Open in LibreCAD after convert",
+                        variable=self._var_launch_librecad).pack(side=tk.LEFT, padx=6)
 
         # ---- Convert button ----
         self._btn_convert = ttk.Button(
@@ -308,12 +311,25 @@ class Pdf2DxfApp(tk.Tk):
             self._log(f"  Text:     {stats.get('text_items', 0)}")
             self._log(f"  Output:   {output_path}")
 
+            launch_message = ""
+            if self._var_launch_librecad.get():
+                from librecad_pdf_importer.launchers.librecad_launcher import launch_librecad
+                launch_ok, launch_status = launch_librecad(output_path)
+                launch_message = launch_status
+                self._log(launch_status)
+                if not launch_ok:
+                    self._log(
+                        "Tip: Install LibreCAD or set the executable path in "
+                        "librecad_pdf_importer.launchers.librecad_launcher.",
+                    )
+
             self.after(0, lambda: messagebox.showinfo(
                 "Done",
                 f"Conversion complete.\n\n"
                 f"Pages: {stats.get('pages', '?')}\n"
                 f"Entities: {stats.get('entities', '?')}\n"
-                f"Output: {output_path}",
+                f"Output: {output_path}"
+                + (f"\n\n{launch_message}" if launch_message else ""),
             ))
 
         except Exception as exc:  # noqa: BLE001

@@ -23,6 +23,9 @@ lcpdf-import = "librecad_pdf_importer.cli:main"
 lcpdf-gui = "gui:launch_gui"
 lcpdf-batch = "librecad_pdf_importer.batch_cli:main"
 
+[project.gui-scripts]
+lcpdf-guiw = "gui:launch_gui"
+
 [tool.setuptools]
 py-modules = ["pdf2dxf", "dxf_builder", "dxf_text_builder", "dxf_import_engine", "gui"]
 

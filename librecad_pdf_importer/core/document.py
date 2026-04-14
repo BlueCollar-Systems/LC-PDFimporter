@@ -369,11 +369,17 @@ def _classify_auto_page(
     ):
         return {"type": "glyph_flood", "reason": "Dense filled glyph-like vectors."}
 
+    # Average items per drawing — glyph vectors typically have 1-3 items each,
+    # while real drawings (garden plans, floor plans) have many more
+    avg_items = total_items / float(max(total, 1))
+
     if (
         total >= AUTO_GLYPH_DRAWING_THRESHOLD
         and (text_blocks_count >= AUTO_GLYPH_TEXT_BLOCK_THRESHOLD or text_words_count >= AUTO_GLYPH_WORD_THRESHOLD)
         and stroke_ratio <= AUTO_GLYPH_STROKE_SPARSE_RATIO
         and fill_ratio >= AUTO_GLYPH_FILL_RATIO
+        and tiny_rect_ratio >= 0.10
+        and avg_items <= 8.0
     ):
         return {"type": "glyph_flood", "reason": "Text-dense glyph vector flood."}
 
@@ -381,6 +387,7 @@ def _classify_auto_page(
         total >= AUTO_FILL_DRAWING_THRESHOLD
         and fill_only_ratio >= AUTO_FILL_HEAVY_RATIO
         and stroke_ratio <= AUTO_FILL_STROKE_MAX
+        and avg_items <= 5.0
     ):
         return {"type": "fill_art", "reason": "Fill-dominant decorative vectors."}
 
@@ -389,6 +396,7 @@ def _classify_auto_page(
         and stroke_ratio <= AUTO_FILL_PURE_STROKE_MAX
         and total >= AUTO_FILL_PURE_MIN_GROUPS
         and (total_items >= AUTO_FILL_PURE_MIN_ITEMS or max_rect_ratio >= AUTO_FILL_PURE_LARGE_RECT_RATIO)
+        and avg_items <= 5.0
     ):
         return {"type": "fill_art", "reason": "Pure-fill decorative vectors."}
 

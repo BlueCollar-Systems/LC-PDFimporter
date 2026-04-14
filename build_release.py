@@ -37,10 +37,22 @@ def _should_include(rel_path: str) -> bool:
     if any(p.startswith(".") for p in parts):
         return False
 
+    # Exclude generated/build directories
+    if "generated" in parts or "release" in parts or "debug" in parts:
+        return False
+
     # Exclude __pycache__ and compiled bytecode
     if "__pycache__" in parts:
         return False
     if rel_path.endswith((".pyc", ".pyo")):
+        return False
+
+    if rel_path.endswith(
+        (
+            ".obj", ".o", ".dll", ".lib", ".exp", ".pdb", ".ilk", ".idb",
+            ".manifest", ".res", ".log", ".tlog", ".cache",
+        )
+    ):
         return False
 
     # Exclude test directories
@@ -54,6 +66,10 @@ def _should_include(rel_path: str) -> bool:
     # Exclude dev-only files
     basename = os.path.basename(rel_path)
     if basename in ("requirements-dev.txt",):
+        return False
+    if basename.startswith("Makefile"):
+        return False
+    if basename.endswith("_resource.rc"):
         return False
 
     return True
@@ -81,8 +97,8 @@ def build(output_dir: str | None = None) -> Path:
             if _should_include(rel):
                 files_to_add.append((item, rel))
 
-    # Walk package directories
-    for package_dir_name in ("pdfcadcore", "librecad_pdf_importer"):
+    # Walk package and auxiliary directories
+    for package_dir_name in ("pdfcadcore", "librecad_pdf_importer", "plugin"):
         package_dir = _PROJECT_ROOT / package_dir_name
         if not package_dir.is_dir():
             continue

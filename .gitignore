@@ -14,3 +14,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 dev_logs/
+generated/
+plugin/lcpdf_menu/Makefile*
+plugin/lcpdf_menu/*.vcxproj*
+plugin/lcpdf_menu/*.sln
+plugin/lcpdf_menu/.qmake.stash
+plugin/lcpdf_menu/*.dll
+plugin/lcpdf_menu/*_resource.rc
+plugin/lcpdf_menu/release/
+plugin/lcpdf_menu/debug/

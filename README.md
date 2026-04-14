@@ -15,7 +15,9 @@ DraftSight, QCAD, and any DXF-compatible CAD software.
 - Organizes geometry into DXF layers (per-page and per-OCG)
 - Multiple import presets: Fast, General, Technical, Shop Drawing, Raster+Vectors, Raster Only, Max Fidelity
 - Outputs DXF versions from R12 through R2018
-- CLI and GUI interfaces
+- CLI and GUI interfaces (including no-console Windows launcher)
+- Optional native LibreCAD `Plugins` menu integration (no terminal)
+- Optional auto-open in LibreCAD after conversion
 - Built on pdfcadcore shared extraction engine
 
 ## Compatibility
@@ -41,6 +43,11 @@ Evidence levels:
 ```
 pip install -r requirements.txt
 pip install -e .
+```
+
+Optional: install the native LibreCAD menu plugin (Windows):
+```
+powershell -ExecutionPolicy Bypass -File .\plugin\build_install_lcpdf_menu.ps1
 ```
 
 ## CLI Usage
@@ -114,7 +121,25 @@ python gui.py
 ```
 
 The GUI provides file pickers, preset selection, page range input, option
-checkboxes, a progress bar, and a status log.
+checkboxes, a progress bar, a status log, and optional auto-open in LibreCAD.
+
+Windows no-console options:
+```
+launch_lcpdf_gui.pyw
+```
+or:
+```
+lcpdf-guiw
+```
+
+## LibreCAD Menu Integration
+
+After running the plugin installer script, restart LibreCAD and use:
+
+- `Plugins > PDF Importer (BlueCollar)...`
+- `Plugins > PDF Importer Settings...`
+
+This launches the importer GUI directly from LibreCAD without a terminal window.
 
 ## Batch Import
 
