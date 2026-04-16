@@ -112,6 +112,11 @@ def classify_page_content(
     fill_only_ratio = fill_only / total if total > 0 else 0
     tiny_rect_ratio = tiny_rects / total if total > 0 else 0
 
+    # Average items per drawing — glyph vectors typically have 1-3 items each,
+    # while real drawings (garden plans, floor plans) have many more
+    total_items = sum(len(d.get("items", []) or []) for d in drawings)
+    avg_items = total_items / float(max(total, 1))
+
     stats = {
         "total": total,
         "has_fill": has_fill,
@@ -122,6 +127,7 @@ def classify_page_content(
         "stroke_ratio": stroke_ratio,
         "fill_only_ratio": fill_only_ratio,
         "tiny_rect_ratio": tiny_rect_ratio,
+        "avg_items": avg_items,
     }
 
     # ── Glyph flood detection ──────────────────────────────────────
@@ -143,8 +149,8 @@ def classify_page_content(
 
     # Text-density variant of glyph flood — requires BOTH high text density
     # AND glyph-like drawing characteristics (sparse strokes, high fills).
-    # Without the fill/stroke check, normal shop drawings with many
-    # dimension labels get falsely flagged.
+    # Also requires tiny rects and low avg items to avoid false positives on
+    # legitimate fill-heavy drawings (garden plans, floor plans).
     if (
         total >= AUTO_GLYPH_DRAWING_THRESHOLD
         and (
@@ -153,6 +159,8 @@ def classify_page_content(
         )
         and stroke_ratio <= AUTO_GLYPH_STROKE_SPARSE_RATIO
         and fill_ratio >= AUTO_GLYPH_FILL_RATIO
+        and tiny_rect_ratio >= 0.10
+        and avg_items <= 8.0
     ):
         return {
             "type": "glyph_flood",
@@ -170,6 +178,7 @@ def classify_page_content(
         if (
             fill_only_ratio >= AUTO_FILL_HEAVY_RATIO
             and stroke_ratio <= AUTO_FILL_STROKE_MAX
+            and avg_items <= 5.0
         ):
             return {
                 "type": "fill_art",
@@ -184,6 +193,7 @@ def classify_page_content(
             fill_only_ratio >= AUTO_FILL_PURE_RATIO
             and stroke_ratio <= AUTO_FILL_PURE_STROKE_MAX
             and total >= AUTO_FILL_PURE_MIN_GROUPS
+            and avg_items <= 5.0
         ):
             return {
                 "type": "fill_art",

@@ -105,8 +105,8 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
                     attribs["linetype"] = ltype
 
             # Helper to offset a point by the page stacking offset
-            def _ofs(pt):
-                return (pt[0], pt[1] + dy)
+            def _ofs(pt, _dy=dy):
+                return (pt[0], pt[1] + _dy)
 
             if primitive.type == "line" and primitive.points and len(primitive.points) == 2:
                 start = _ofs(primitive.points[0])

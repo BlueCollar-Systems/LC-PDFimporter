@@ -79,10 +79,10 @@ def _quad_to_points(
     corners = []
     try:
         corners = [
-            _xy(getattr(quad_obj, "ul")),
-            _xy(getattr(quad_obj, "ur")),
-            _xy(getattr(quad_obj, "lr")),
-            _xy(getattr(quad_obj, "ll")),
+            _xy(quad_obj.ul),
+            _xy(quad_obj.ur),
+            _xy(quad_obj.lr),
+            _xy(quad_obj.ll),
         ]
     except AttributeError:
         try:
