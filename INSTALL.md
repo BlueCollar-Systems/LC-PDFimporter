@@ -21,8 +21,8 @@ python pdf2dxf.py "C:\path\to\drawing.pdf" "C:\output\drawing.dxf"
 ```bash
 python gui.py
 ```
-A window opens where you can browse for a PDF, choose presets, export, and
-auto-open the DXF in LibreCAD.
+A window opens where you can browse for a PDF, choose mode + text rendering,
+export, and auto-open the DXF in LibreCAD.
 
 ### Option 3b: Double-click launcher (Windows, no terminal)
 - Double-click `launch_lcpdf_gui.pyw`
@@ -39,15 +39,21 @@ python -m librecad_pdf_importer.batch_cli "C:\folder\with\pdfs"
 2. Click `Convert`
 3. LibreCAD opens automatically with the generated DXF
 
-## Presets
+## Modes (BCS-ARCH-001)
 
-| Preset | Best For | Speed |
-|--------|----------|-------|
-| fast | Quick preview | Fastest |
-| general | Most PDFs | Fast |
-| technical | Engineering drawings | Medium |
-| shop | Fabrication shop drawings | Medium |
-| max | Maximum accuracy | Slower |
+Every mode targets **indistinguishable-from-source** fidelity. Modes differ
+only in extraction strategy, not in quality tier.
+
+| Mode | When to Use |
+|------|-------------|
+| **auto** *(default)* | Picks the right strategy per page automatically |
+| **vector** | Clean vector PDFs (CAD exports, shop drawings) |
+| **raster** | Scanned or image-only PDFs |
+| **hybrid** | Mixed content (vectors + embedded raster) |
+
+### Text Rendering (orthogonal)
+
+Labels (default) · 3D Text · Glyphs · Geometry · plus an Import text toggle.
 
 ## Requirements
 
@@ -59,6 +65,9 @@ python -m librecad_pdf_importer.batch_cli "C:\folder\with\pdfs"
 
 **Black screen when opening DXF?** The importer auto-inverts white lines to black for visibility. If you still see a blank screen, try View > Auto Zoom in LibreCAD.
 
-**Missing text?** Try the `technical` or `max` preset which extracts more text detail.
+**Missing text?** Auto mode should handle text well. If text is missing, try
+explicitly `--mode vector` and check the text-rendering setting (Labels is the
+default; try Glyphs for symbol-heavy PDFs).
 
-**Geometry looks wrong?** Try a different preset — `shop` is best for steel fabrication drawings.
+**Geometry looks wrong?** Auto mode should pick the right strategy. If not, try
+`--mode vector` for CAD drawings or `--mode hybrid` for PDFs with embedded raster.

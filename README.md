@@ -11,9 +11,10 @@ DraftSight, QCAD, and any DXF-compatible CAD software.
 - Preserves stroke colors, line widths, and dash patterns
 - Imports text with font size and rotation
 - Supports text modes (`labels`, `geometry`, `none`) and strict-text fidelity
-- Supports raster-only and hybrid raster+vector import modes
+- **4 Import Modes** (BCS-ARCH-001): Auto (default, picks strategy per page), Vector, Raster, Hybrid
+- **4 Text Rendering Options**: Labels, 3D Text, Glyphs, Geometry (orthogonal to mode; 3D Text falls back to Labels in DXF)
+- **Maximum fidelity by default** -- no quality tiers, no fast-mode compromises
 - Organizes geometry into DXF layers (per-page and per-OCG)
-- Multiple import presets: Fast, General, Technical, Shop Drawing, Raster+Vectors, Raster Only, Max Fidelity
 - Outputs DXF versions from R12 through R2018
 - CLI and GUI interfaces (including no-console Windows launcher)
 - Optional native LibreCAD `Plugins` menu integration (no terminal)
@@ -62,14 +63,14 @@ Specify output path:
 python pdf2dxf.py drawing.pdf output.dxf
 ```
 
-Convert specific pages with a preset:
+Convert specific pages with a mode:
 ```
-python pdf2dxf.py drawing.pdf --pages 1,3,5 --preset technical --verbose
+python pdf2dxf.py drawing.pdf --pages 1,3,5 --mode vector --verbose
 ```
 
-Skip text and arc detection for speed:
+Force raster mode for scanned PDFs:
 ```
-python pdf2dxf.py drawing.pdf --no-text --no-arcs --preset fast
+python pdf2dxf.py drawing.pdf --mode raster
 ```
 
 Target a specific DXF version:
@@ -83,9 +84,9 @@ python pdf2dxf.py input.pdf [output.dxf] [options]
 
 Options:
   --pages 1,2,3          Pages to convert (default: all)
-  --preset PRESET        fast | general | technical | shop | full | raster_vector | raster_only | max (default: shop)
-  --mode MODE            auto | vectors | raster | hybrid
-  --text-mode MODE       labels | geometry | none
+  --mode MODE            auto | vector | raster | hybrid  (default: auto)
+  --text-mode MODE       labels | 3d_text | glyphs | geometry  (default: labels)
+  --import-text / --no-import-text  Whether to import text at all (default: on)
   --strict-text-fidelity / --no-strict-text-fidelity
   --hatch-mode MODE      import | group | skip
   --arc-mode MODE        auto | preserve | rebuild | polyline
@@ -120,8 +121,9 @@ Or run the GUI directly:
 python gui.py
 ```
 
-The GUI provides file pickers, preset selection, page range input, option
-checkboxes, a progress bar, a status log, and optional auto-open in LibreCAD.
+The GUI provides file pickers, mode selection (Auto / Vector / Raster / Hybrid),
+text-rendering selection (Labels / 3D Text / Glyphs / Geometry), page range input,
+option checkboxes, a progress bar, a status log, and optional auto-open in LibreCAD.
 
 Windows no-console options:
 ```
@@ -146,12 +148,12 @@ This launches the importer GUI directly from LibreCAD without a terminal window.
 Convert an entire directory tree of PDFs to DXF:
 
 ```
-python -m librecad_pdf_importer.batch_cli "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --preset technical --pages all --json batch_report.json
+python -m librecad_pdf_importer.batch_cli "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --mode auto --pages all --json batch_report.json
 ```
 
 Installed entrypoint:
 ```
-lcpdf-batch "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --preset technical --pages all
+lcpdf-batch "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --mode auto --pages all
 ```
 
 ## QA Smoke Harness
@@ -159,21 +161,31 @@ lcpdf-batch "C:\path\to\pdfs" "C:\path\to\out_dxf" --recursive --preset technica
 Run a quick automated smoke-test pass on one PDF or a folder:
 
 ```
-python -m librecad_pdf_importer.qa_smoke "C:\path\to\pdfs" --preset technical --pages 1 --min-entities 1 --json qa_smoke.json
+python -m librecad_pdf_importer.qa_smoke "C:\path\to\pdfs" --mode auto --pages 1 --min-entities 1 --json qa_smoke.json
 ```
 
-## Import Presets
+## Import Modes (BCS-ARCH-001)
 
-| Preset     | Best For                          | Speed   |
-|------------|-----------------------------------|---------|
-| fast       | Quick preview, large files        | Fastest |
-| general    | Most general-purpose PDFs         | Fast    |
-| technical  | Engineering / technical drawings  | Medium  |
-| shop       | Fabrication / shop drawings       | Medium  |
-| raster_vector | Raster background + vector overlay | Medium |
-| raster_only | Raster rendering only (no vectors) | Fast |
-| full       | Same as shop                      | Medium  |
-| max        | Highest accuracy, archival        | Slowest |
+Every mode targets **indistinguishable-from-source** fidelity within DXF's
+capabilities. Modes differ only in extraction *strategy*, not quality tier.
+
+| Mode | When to Use |
+|------|-------------|
+| **auto** *(default)* | Picks vector/raster/hybrid per page. Reports what it chose. |
+| **vector** | Clean vector PDFs (CAD exports, shop drawings). |
+| **raster** | Scanned or image-only PDFs. |
+| **hybrid** | Mixed content (vectors + embedded raster). |
+
+### Text Rendering (orthogonal to mode)
+
+| Option | Behavior in DXF |
+|--------|-----------------|
+| **labels** *(default)* | MTEXT/TEXT entities, editable as text |
+| **3d_text** | Falls back to `labels` (DXF has no 3D text primitive) |
+| **glyphs** | Per-character vector glyphs via pdftocairo |
+| **geometry** | Text converted to lines/polylines |
+
+Plus `--import-text` / `--no-import-text` to skip text entirely.
 
 ## DXF Compatibility
 
