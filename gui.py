@@ -150,23 +150,17 @@ class Pdf2DxfApp(tk.Tk):
         ).grid(row=8, column=1, sticky=tk.W, **pad)
 
         # ---- Option checkboxes ----
+        # BCS-ARCH-001 Rule 5 sweep: only Import text and Open-in-LibreCAD
+        # remain user-facing. Detect arcs / Map dash patterns / Make faces
+        # were quality-tier dials and are now hardcoded True internally.
         opts_frame = ttk.LabelFrame(frame, text="Options", padding=6)
         opts_frame.grid(row=9, column=0, columnspan=3, sticky=tk.EW, **pad)
 
         self._var_import_text = tk.BooleanVar(value=True)
-        self._var_detect_arcs = tk.BooleanVar(value=True)
-        self._var_map_dashes = tk.BooleanVar(value=True)
-        self._var_make_faces = tk.BooleanVar(value=True)
         self._var_launch_librecad = tk.BooleanVar(value=True)
 
         ttk.Checkbutton(opts_frame, text="Import text",
                         variable=self._var_import_text).pack(side=tk.LEFT, padx=6)
-        ttk.Checkbutton(opts_frame, text="Detect arcs",
-                        variable=self._var_detect_arcs).pack(side=tk.LEFT, padx=6)
-        ttk.Checkbutton(opts_frame, text="Map dash patterns",
-                        variable=self._var_map_dashes).pack(side=tk.LEFT, padx=6)
-        ttk.Checkbutton(opts_frame, text="Make faces",
-                        variable=self._var_make_faces).pack(side=tk.LEFT, padx=6)
         ttk.Checkbutton(opts_frame, text="Open in LibreCAD after convert",
                         variable=self._var_launch_librecad).pack(side=tk.LEFT, padx=6)
 
@@ -280,9 +274,6 @@ class Pdf2DxfApp(tk.Tk):
 
             config.import_text = self._var_import_text.get()
             config.text_mode = TEXT_MODES.get(self._var_text_mode.get(), "labels")
-            config.detect_arcs = self._var_detect_arcs.get()
-            config.map_dashes = self._var_map_dashes.get()
-            config.make_faces = self._var_make_faces.get()
             config.verbose = True
 
             # Parse pages

@@ -48,10 +48,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Import mode (BCS-ARCH-001, default: auto)")
     p.add_argument("--scale", type=float, default=1.0,
                    help="Scale factor (default: 1.0)")
-    p.add_argument("--no-text", action="store_true",
-                   help="Skip text import")
-    p.add_argument("--no-arcs", action="store_true",
-                   help="Skip arc detection")
+    p.add_argument("--text-mode", default=None,
+                   choices=["labels", "3d_text", "glyphs", "geometry"],
+                   help="Text rendering (orthogonal to --mode)")
+    p.add_argument("--import-text",
+                   action=argparse.BooleanOptionalAction,
+                   default=None,
+                   help="Import text from the PDF (--no-import-text to skip)")
     p.add_argument("--dxf-version", default="R2010", choices=DXF_VERSIONS,
                    help="DXF version (default: R2010)")
     p.add_argument("--gui", action="store_true",
@@ -114,10 +117,11 @@ def main(argv: list[str] | None = None) -> int:
     config: ImportConfig = factory()
     config.user_scale = args.scale
     config.verbose = args.verbose
-    if args.no_text:
-        config.import_text = False
-    if args.no_arcs:
-        config.detect_arcs = False
+    if args.text_mode is not None:
+        config.text_mode = args.text_mode
+        config.import_text = True
+    if args.import_text is not None:
+        config.import_text = bool(args.import_text)
     if args.pages:
         config.pages = _parse_pages(args.pages)
 

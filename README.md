@@ -87,22 +87,20 @@ Options:
   --mode MODE            auto | vector | raster | hybrid  (default: auto)
   --text-mode MODE       labels | 3d_text | glyphs | geometry  (default: labels)
   --import-text / --no-import-text  Whether to import text at all (default: on)
-  --strict-text-fidelity / --no-strict-text-fidelity
-  --hatch-mode MODE      import | group | skip
-  --arc-mode MODE        auto | preserve | rebuild | polyline
-  --cleanup-level LVL    conservative | balanced | aggressive
-  --lineweight-mode MODE ignore | preserve | group | map_to_layers
-  --grouping-mode MODE   single | per_page | per_layer | per_color | nested_page_layer | nested_page_lineweight
-  --raster-dpi DPI       Raster rendering DPI for raster/hybrid modes
-  --no-raster-fallback   Disable automatic raster fallback when vectors are absent
   --scale 1.0            Scale factor
-  --no-text              Skip text import
-  --no-arcs              Skip arc detection
   --dxf-version VER      R12 | R2000 | R2004 | R2007 | R2010 | R2013 | R2018
   --gui                  Launch GUI instead of CLI
   --verbose              Print progress
   --version              Show version
 ```
+
+Per BCS-ARCH-001 Rule 5 the previous quality-tier CLI flags
+(`--strict-text-fidelity`, `--hatch-mode`, `--arc-mode`,
+`--cleanup-level`, `--lineweight-mode`, `--grouping-mode`,
+`--raster-dpi`, `--no-raster-fallback`, `--no-text`, `--no-arcs`)
+have been removed. Their consolidated values are applied universally
+because every mode targets identical "indistinguishable from source"
+quality.
 
 ## GUI Usage
 

@@ -1,4 +1,4 @@
-"""BCS-ARCH-001 clean-break contract: old --preset is gone (LC)."""
+"""BCS-ARCH-001 clean-break contract: old --preset and quality-tier flags gone (LC)."""
 from __future__ import annotations
 
 import os
@@ -9,6 +9,19 @@ from pathlib import Path
 
 
 TEST_PDF = Path(r"C:\Users\Rowdy Payton\Desktop\PDFTest Files\1015 - Rev 0.pdf")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+GUI_PY = REPO_ROOT / "gui.py"
+
+
+def _run_cli(*args: str) -> subprocess.CompletedProcess:
+    cmd = [sys.executable, "-m", "librecad_pdf_importer.cli", *args]
+    return subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 class TestCleanBreak(unittest.TestCase):
@@ -16,24 +29,9 @@ class TestCleanBreak(unittest.TestCase):
 
     @unittest.skipUnless(TEST_PDF.is_file(), f"Test PDF not available: {TEST_PDF}")
     def test_old_preset_flag_errors_out(self) -> None:
-        cmd = [
-            sys.executable,
-            "-m",
-            "librecad_pdf_importer.cli",
-            str(TEST_PDF),
-            "--preset",
-            "shop",
-        ]
-        result = subprocess.run(
-            cmd,
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = _run_cli(str(TEST_PDF), "--preset", "shop")
         self.assertNotEqual(
-            result.returncode,
-            0,
+            result.returncode, 0,
             msg="--preset should be rejected; it was accepted instead",
         )
         combined = (result.stdout + result.stderr).lower()
@@ -41,6 +39,72 @@ class TestCleanBreak(unittest.TestCase):
             "unrecognized arguments" in combined or "--preset" in combined,
             msg=f"Unexpected error output: {combined!r}",
         )
+
+
+class TestRule5FlagsRemoved(unittest.TestCase):
+    """BCS-ARCH-001 Rule 5 sweep: quality-tier CLI flags must error out."""
+
+    REMOVED_FLAGS = (
+        "--hatch-mode",
+        "--arc-mode",
+        "--cleanup-level",
+        "--lineweight-mode",
+        "--raster-dpi",
+        "--strict-text-fidelity",
+        "--no-strict-text-fidelity",
+        "--no-arcs",
+        "--no-text",
+        "--no-raster-fallback",
+        "--grouping-mode",
+    )
+
+    @unittest.skipUnless(TEST_PDF.is_file(), f"Test PDF not available: {TEST_PDF}")
+    def test_removed_flags_error_out(self) -> None:
+        for flag in self.REMOVED_FLAGS:
+            with self.subTest(flag=flag):
+                result = _run_cli(str(TEST_PDF), flag, "x")
+                self.assertNotEqual(
+                    result.returncode, 0,
+                    msg=f"{flag!r} should be rejected; it was accepted instead",
+                )
+                combined = (result.stdout + result.stderr).lower()
+                self.assertTrue(
+                    "unrecognized arguments" in combined or flag.lower() in combined,
+                    msg=f"Unexpected output for {flag}: {combined!r}",
+                )
+
+
+class TestRule5GuiCheckboxesRemoved(unittest.TestCase):
+    """GUI must not expose quality-tier checkboxes after Rule 5 sweep."""
+
+    REMOVED_VARS = (
+        "_var_detect_arcs",
+        "_var_map_dashes",
+        "_var_make_faces",
+    )
+
+    REMOVED_LABELS = (
+        '"Detect arcs"',
+        '"Map dash patterns"',
+        '"Make faces"',
+    )
+
+    def setUp(self) -> None:
+        self.source = GUI_PY.read_text(encoding="utf-8")
+
+    def test_removed_vars_not_declared(self) -> None:
+        for var in self.REMOVED_VARS:
+            self.assertNotIn(
+                var, self.source,
+                f"GUI still declares quality-tier variable {var!r} (BCS-ARCH-001 Rule 5).",
+            )
+
+    def test_removed_checkbox_labels_gone(self) -> None:
+        for lbl in self.REMOVED_LABELS:
+            self.assertNotIn(
+                lbl, self.source,
+                f"GUI still has quality-tier checkbox label {lbl!r} (BCS-ARCH-001 Rule 5).",
+            )
 
 
 if __name__ == "__main__":
