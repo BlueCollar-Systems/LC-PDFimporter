@@ -21,9 +21,9 @@ def _collect_inputs(path: Path) -> list[Path]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run a smoke QA pass for the LibreCAD PDF importer.")
     p.add_argument("input_path", help="PDF file or directory of PDFs")
-    p.add_argument("--preset", default="technical",
-                   choices=["fast", "general", "technical", "shop", "raster_vector", "raster_only", "max"],
-                   help="Import preset")
+    p.add_argument("--mode", default="auto",
+                   choices=["auto", "vector", "raster", "hybrid"],
+                   help="Import mode (BCS-ARCH-001)")
     p.add_argument("--pages", default="1", help="Page spec")
     p.add_argument("--min-entities", type=int, default=1, help="Minimum entity count to pass")
     p.add_argument("--json", default=None, help="Write JSON report")
@@ -43,7 +43,7 @@ def main() -> int:
         td_path = Path(td)
         for pdf in pdfs:
             try:
-                run = run_import(str(pdf), preset=args.preset, overrides={"pages": args.pages})
+                run = run_import(str(pdf), mode=args.mode, overrides={"pages": args.pages})
                 out_dxf = td_path / f"{pdf.stem}.dxf"
                 export = export_to_dxf(run.extraction, str(out_dxf), DxfExportOptions())
                 ok = export.entity_count >= args.min_entities

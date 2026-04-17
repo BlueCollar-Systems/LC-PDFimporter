@@ -24,25 +24,23 @@ if _PROJECT_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-PRESETS = {
-    "Fast Preview":     "fast",
-    "General Vector":   "general",
-    "Technical Drawing": "technical",
-    "Shop Drawing":     "shop",
-    "Full":             "full",
-    "Max Fidelity":     "max",
+MODES = {
+    "Auto":   "auto",
+    "Vector": "vector",
+    "Raster": "raster",
+    "Hybrid": "hybrid",
+}
+
+# BCS-ARCH-001: text rendering is orthogonal to mode. Four text options
+# (Labels, 3D Text, Glyphs, Geometry) plus a separate "Import text" toggle.
+TEXT_MODES = {
+    "Labels":   "labels",
+    "3D Text":  "3d_text",
+    "Glyphs":   "glyphs",
+    "Geometry": "geometry",
 }
 
 DXF_VERSIONS = ("R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018")
-
-PRESET_FACTORIES = {
-    "fast":      "fast",
-    "general":   "general_vector",
-    "technical": "technical_drawing",
-    "shop":      "shop_drawing",
-    "full":      "full",
-    "max":       "max_fidelity",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -101,13 +99,13 @@ class Pdf2DxfApp(tk.Tk):
             row=3, column=2, **pad,
         )
 
-        # ---- Preset ----
-        ttk.Label(frame, text="Preset:").grid(row=4, column=0, sticky=tk.W, **pad)
-        self._var_preset = tk.StringVar(value="Shop Drawing")
+        # ---- Mode (BCS-ARCH-001) ----
+        ttk.Label(frame, text="Mode:").grid(row=4, column=0, sticky=tk.W, **pad)
+        self._var_mode = tk.StringVar(value="Auto")
         ttk.Combobox(
             frame,
-            textvariable=self._var_preset,
-            values=list(PRESETS.keys()),
+            textvariable=self._var_mode,
+            values=list(MODES.keys()),
             state="readonly",
             width=20,
         ).grid(row=4, column=1, sticky=tk.W, **pad)
@@ -129,8 +127,19 @@ class Pdf2DxfApp(tk.Tk):
             row=6, column=1, sticky=tk.W, **pad,
         )
 
+        # ---- Text mode (BCS-ARCH-001, orthogonal to import mode) ----
+        ttk.Label(frame, text="Text Mode:").grid(row=7, column=0, sticky=tk.W, **pad)
+        self._var_text_mode = tk.StringVar(value="Labels")
+        ttk.Combobox(
+            frame,
+            textvariable=self._var_text_mode,
+            values=list(TEXT_MODES.keys()),
+            state="readonly",
+            width=20,
+        ).grid(row=7, column=1, sticky=tk.W, **pad)
+
         # ---- DXF version ----
-        ttk.Label(frame, text="DXF Version:").grid(row=7, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="DXF Version:").grid(row=8, column=0, sticky=tk.W, **pad)
         self._var_dxf_ver = tk.StringVar(value="R2010")
         ttk.Combobox(
             frame,
@@ -138,11 +147,11 @@ class Pdf2DxfApp(tk.Tk):
             values=list(DXF_VERSIONS),
             state="readonly",
             width=10,
-        ).grid(row=7, column=1, sticky=tk.W, **pad)
+        ).grid(row=8, column=1, sticky=tk.W, **pad)
 
         # ---- Option checkboxes ----
         opts_frame = ttk.LabelFrame(frame, text="Options", padding=6)
-        opts_frame.grid(row=8, column=0, columnspan=3, sticky=tk.EW, **pad)
+        opts_frame.grid(row=9, column=0, columnspan=3, sticky=tk.EW, **pad)
 
         self._var_import_text = tk.BooleanVar(value=True)
         self._var_detect_arcs = tk.BooleanVar(value=True)
@@ -165,21 +174,21 @@ class Pdf2DxfApp(tk.Tk):
         self._btn_convert = ttk.Button(
             frame, text="Convert", command=self._start_conversion,
         )
-        self._btn_convert.grid(row=9, column=0, columnspan=3, **pad)
+        self._btn_convert.grid(row=10, column=0, columnspan=3, **pad)
 
         # ---- Progress bar ----
         self._progress = ttk.Progressbar(frame, mode="indeterminate", length=400)
-        self._progress.grid(row=10, column=0, columnspan=3, sticky=tk.EW, **pad)
+        self._progress.grid(row=11, column=0, columnspan=3, sticky=tk.EW, **pad)
 
         # ---- Status log ----
-        ttk.Label(frame, text="Log:").grid(row=11, column=0, sticky=tk.NW, **pad)
+        ttk.Label(frame, text="Log:").grid(row=12, column=0, sticky=tk.NW, **pad)
         self._log_text = tk.Text(frame, height=10, width=70, state=tk.DISABLED,
                                  wrap=tk.WORD, font=("Consolas", 9))
-        self._log_text.grid(row=12, column=0, columnspan=3, sticky=tk.NSEW, **pad)
+        self._log_text.grid(row=13, column=0, columnspan=3, sticky=tk.NSEW, **pad)
 
         # Let the log area expand when the window is resized
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(12, weight=1)
+        frame.rowconfigure(13, weight=1)
 
     # ------------------------------------------------------------------
     # Browse dialogs
@@ -259,9 +268,9 @@ class Pdf2DxfApp(tk.Tk):
             from pdfcadcore.import_config import ImportConfig
             from dxf_import_engine import convert
 
-            preset_key = PRESETS.get(self._var_preset.get(), "shop")
-            factory_name = PRESET_FACTORIES.get(preset_key, "shop_drawing")
-            config: ImportConfig = getattr(ImportConfig, factory_name)()
+            # BCS-ARCH-001: direct mode -> classmethod dispatch. No preset map.
+            mode_key = MODES.get(self._var_mode.get(), "auto")
+            config: ImportConfig = getattr(ImportConfig, mode_key)()
 
             # Apply GUI overrides
             try:
@@ -270,8 +279,7 @@ class Pdf2DxfApp(tk.Tk):
                 config.user_scale = 1.0
 
             config.import_text = self._var_import_text.get()
-            if not config.import_text:
-                config.text_mode = "none"
+            config.text_mode = TEXT_MODES.get(self._var_text_mode.get(), "labels")
             config.detect_arcs = self._var_detect_arcs.get()
             config.map_dashes = self._var_map_dashes.get()
             config.make_faces = self._var_make_faces.get()

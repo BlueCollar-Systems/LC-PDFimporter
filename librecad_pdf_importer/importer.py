@@ -1,4 +1,4 @@
-"""Preset-driven import orchestration for LibreCAD PDF importer."""
+"""Mode-driven import orchestration for LibreCAD PDF importer (BCS-ARCH-001)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,82 +14,45 @@ class ImportRun:
     config: ImportConfig
 
 
-def _preset_config(name: str) -> ImportConfig:
-    key = (name or "general").strip().lower()
-    if key in {"fast", "preview"}:
-        return ImportConfig.fast()
-    if key in {"raster_vector", "raster+vectors", "hybrid"}:
-        cfg = ImportConfig.full()
-        cfg.import_mode = "hybrid"
-        cfg.ignore_images = False
-        cfg.raster_fallback = True
-        cfg.text_mode = "labels"
-        return cfg
-    if key in {"raster_only", "raster"}:
-        cfg = ImportConfig.fast()
-        cfg.import_mode = "raster"
-        cfg.ignore_images = False
-        cfg.import_text = False
-        cfg.text_mode = "none"
-        cfg.detect_arcs = False
-        return cfg
-    if key in {"max", "max_fidelity", "fidelity"}:
-        return ImportConfig.max_fidelity()
-    if key in {"shop", "shop_drawing", "full"}:
-        return ImportConfig.full()
-    if key in {"technical", "tech"}:
-        cfg = ImportConfig.full()
-        cfg.cleanup_level = "aggressive"
-        cfg.arc_mode = "rebuild"
-        cfg.text_mode = "labels"
-        return cfg
-    if key in {"general", "default"}:
-        cfg = ImportConfig()
-        cfg.text_mode = "labels"
-        return cfg
-    return ImportConfig()
+def _mode_config(mode: str) -> ImportConfig:
+    """Dispatch a BCS-ARCH-001 mode name to the matching ImportConfig.
+
+    The four valid modes are: auto, vector, raster, hybrid.
+    No preset names are accepted; any other value raises ValueError.
+    """
+    key = (mode or "auto").strip().lower()
+    if key == "auto":
+        return ImportConfig.auto()
+    if key == "vector":
+        return ImportConfig.vector()
+    if key == "raster":
+        return ImportConfig.raster()
+    if key == "hybrid":
+        return ImportConfig.hybrid()
+    raise ValueError(
+        f"Unknown import mode: {mode!r}. "
+        "Valid modes: auto, vector, raster, hybrid (BCS-ARCH-001)."
+    )
 
 
-def _preset_runtime_tuning(name: str) -> Dict[str, Any]:
-    key = (name or "general").strip().lower()
-    if key in {"fast", "preview"}:
-        return {"min_segment_mm": 0.40, "max_text_items_per_page": 0}
-    if key in {"raster_only", "raster"}:
-        return {"min_segment_mm": 0.50, "max_text_items_per_page": 0}
-    if key in {"raster_vector", "raster+vectors", "hybrid"}:
-        return {"min_segment_mm": 0.05, "max_text_items_per_page": 800}
-    if key in {"technical", "tech"}:
-        return {"min_segment_mm": 0.02, "max_text_items_per_page": 1500}
-    if key in {"shop", "shop_drawing", "full"}:
-        return {"min_segment_mm": 0.02, "max_text_items_per_page": 2500}
-    if key in {"max", "max_fidelity", "fidelity"}:
-        return {"min_segment_mm": 0.0, "max_text_items_per_page": None}
-    return {"min_segment_mm": 0.05, "max_text_items_per_page": 4000}
-
-
-def run_import(pdf_path: str, preset: str = "general",
+def run_import(pdf_path: str, mode: str = "auto",
                overrides: Optional[Dict[str, Any]] = None) -> ImportRun:
-    cfg = _preset_config(preset)
-    tuning = _preset_runtime_tuning(preset)
+    cfg = _mode_config(mode)
     for key, value in (overrides or {}).items():
         if hasattr(cfg, key):
             setattr(cfg, key, value)
-        elif key in {"min_segment_mm", "max_text_items_per_page"}:
-            tuning[key] = value
 
     opts = ExtractionOptions(
         pages=cfg.pages,
         scale=cfg.user_scale,
         flip_y=cfg.flip_y,
-        import_text=cfg.import_text and cfg.text_mode != "none",
+        import_text=cfg.import_text,
         import_images=not cfg.ignore_images,
         import_mode=cfg.import_mode,
         raster_fallback=cfg.raster_fallback,
         raster_dpi=cfg.raster_dpi,
         detect_arcs=cfg.detect_arcs,
         arc_fit_tol_mm=cfg.arc_fit_tol_mm,
-        min_segment_mm=float(tuning.get("min_segment_mm", 0.0) or 0.0),
-        max_text_items_per_page=tuning.get("max_text_items_per_page"),
     )
 
     extraction = extract_document(pdf_path, opts)

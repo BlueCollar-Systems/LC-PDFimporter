@@ -1,9 +1,24 @@
 # -*- coding: utf-8 -*-
-# import_config.py — Versioned import configuration
-# BlueCollar Systems — BUILT. NOT BOUGHT.
+# import_config.py -- Versioned import configuration
+# BlueCollar Systems -- BUILT. NOT BOUGHT.
 """
-Centralised, versioned import configuration for PDF Vector Importers.
+Centralised import configuration for PDF Vector Importers.
 Shared across FreeCAD, Blender, and LibreCAD hosts.
+
+BCS-ARCH-001 compliance (authoritative; see _LLM_CONTROL_PACK/BCS-ARCH-001.md):
+
+- Four modes only: auto (default), vector, raster, hybrid.
+- Text rendering is a separate orthogonal control:
+  labels, 3d_text, glyphs, geometry.
+- Every mode targets indistinguishable-from-source fidelity.
+  Modes differ only in extraction strategy on different input types;
+  they do NOT differ in quality target.
+- No preset-specific parameter tuning. Every parameter has one correct
+  value.
+
+The deprecated preset names (fast, general, technical, shop,
+raster_vector, raster_only, max) have been removed. Do not re-introduce
+them under any name.
 """
 from __future__ import annotations
 
@@ -11,45 +26,47 @@ from dataclasses import dataclass, asdict, fields
 from typing import Any, Dict, List, Optional
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Cleanup presets  (tolerance values in mm)
-# ──────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------
+# Cleanup tolerances (tolerance values in mm).
+# BCS-ARCH-001 Rule 5: one correct value per parameter. "balanced" is
+# retained as the tightest *safe* level — "aggressive" can collapse
+# real hairline geometry; "conservative" is too loose to meet the
+# "indistinguishable from source" quality bar.
+# --------------------------------------------------------------------
 CLEANUP_PRESETS: Dict[str, Dict[str, float]] = {
-    "conservative": {
-        "merge_tol": 0.5,
-        "collinear_tol": 0.25,
-        "min_seg": 0.25,
-    },
     "balanced": {
         "merge_tol": 0.1,
         "collinear_tol": 0.05,
         "min_seg": 0.05,
-    },
-    "aggressive": {
-        "merge_tol": 0.01,
-        "collinear_tol": 0.005,
-        "min_seg": 0.01,
     },
 }
 
 
 @dataclass
 class ImportConfig:
-    """Versioned import configuration for PDF Vector Importers."""
+    """Import configuration for PDF Vector Importers (BCS-ARCH-001)."""
 
-    VERSION: str = "2.0"
+    VERSION: str = "3.0"
 
-    # ── Core geometry options ────────────────────────────────────────
+    # ---- Core geometry options ----------------------------------
     pages: Optional[List[int]] = None
     scale_to_mm: bool = True
     user_scale: float = 1.0
     flip_y: bool = True
-    join_tol: float = 0.1
+    # Consolidated to the tightest value ("max_fidelity" old value).
+    join_tol: float = 0.05
     min_seg_len: float = 0.0
-    curve_step_mm: float = 0.5
+    curve_step_mm: float = 0.2
     make_faces: bool = True
     import_text: bool = True
-    text_mode: str = "labels"               # "labels" | "geometry" | "none"
+
+    # Text rendering (orthogonal to mode). One of:
+    #   "labels"   -- host-native text objects, editable as text
+    #   "3d_text"  -- extruded geometric text (host support varies)
+    #   "glyphs"   -- text rendered as per-character vector glyphs
+    #   "geometry" -- text fully converted to non-editable geometry
+    text_mode: str = "labels"
+
     strict_text_fidelity: bool = True
     group_by_color: bool = True
     assign_lineweight: bool = True
@@ -57,33 +74,45 @@ class ImportConfig:
     verbose: bool = True
     create_top_group: bool = True
     hatch_to_faces: bool = True
-    hatch_mode: str = "import"              # "import" | "skip" | "group"
+    hatch_mode: str = "group"               # "import" | "skip" | "group"
     ignore_images: bool = False
     raster_fallback: bool = True
-    raster_dpi: int = 200
-    import_mode: str = "auto"               # "auto" | "vectors" | "raster" | "hybrid"
+    raster_dpi: int = 300
+    # Mode (BCS-ARCH-001). One of:
+    #   "auto"   -- default; pick strategy per page from classifier
+    #   "vector" -- force vector extraction
+    #   "raster" -- force raster rendering
+    #   "hybrid" -- mixed vectors + raster regions
+    import_mode: str = "auto"
     max_bezier_segments: int = 128
 
-    # ── Arc reconstruction ───────────────────────────────────────────
+    # ---- Arc reconstruction -------------------------------------
     detect_arcs: bool = True
-    arc_fit_tol_mm: float = 0.08
+    arc_fit_tol_mm: float = 0.05
     min_arc_angle_deg: float = 5.0
     arc_sampling_pts: int = 7
 
-    # ── Layering ─────────────────────────────────────────────────────
+    # ---- Layering -----------------------------------------------
     layer_mode: str = "auto"                # "auto" | "ocg" | "color" | "none"
 
-    # ── Object-count management ──────────────────────────────────────
+    # ---- Object-count management --------------------------------
     compound_batch_size: int = 200
     heavy_page_threshold: int = 3000
 
-    # ── Phase 2 options ──────────────────────────────────────────────
+    # ---- Phase 2 options ----------------------------------------
     arc_mode: str = "auto"
     cleanup_level: str = "balanced"
-    lineweight_mode: str = "ignore"
+    lineweight_mode: str = "preserve"
     grouping_mode: str = "per_page"
 
-    # ─────────────────────────────────────────────────────────────────
+    # ---- Auto-mode resolution record (populated at extract time) ----
+    # When import_mode == "auto", the extractor classifies each page and
+    # resolves to "vector"/"raster"/"hybrid". These fields record the
+    # per-document summary so host adapters can report to the user.
+    auto_resolved_mode: Optional[str] = None
+    auto_reason: Optional[str] = None
+
+    # --------------------------------------------------------------
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d.pop("VERSION", None)
@@ -99,69 +128,38 @@ class ImportConfig:
         return dict(CLEANUP_PRESETS.get(self.cleanup_level,
                                         CLEANUP_PRESETS["balanced"]))
 
-    # ── Named constructors (presets) ─────────────────────────────────
+    # ---- Mode constructors (BCS-ARCH-001) -----------------------
+    # These are the ONLY named constructors that exist. Deprecated
+    # preset constructors (fast, general_vector, technical_drawing,
+    # shop_drawing, full, max_fidelity) have been removed per
+    # BCS-ARCH-001 and MUST NOT be reintroduced.
     @classmethod
-    def fast(cls) -> "ImportConfig":
-        """Fast Preview — speed over fidelity."""
+    def auto(cls) -> "ImportConfig":
+        """Auto mode (default). Strategy is chosen per page at extract time."""
+        return cls(import_mode="auto")
+
+    @classmethod
+    def vector(cls) -> "ImportConfig":
+        """Vector mode. Extract all vector geometry faithfully. No raster fallback."""
+        return cls(import_mode="vector", raster_fallback=False)
+
+    @classmethod
+    def raster(cls) -> "ImportConfig":
+        """Raster mode. Place page as high-DPI image. No vector extraction."""
         return cls(
-            curve_step_mm=2.0, join_tol=0.5, detect_arcs=False,
-            map_dashes=False, make_faces=False, import_text=False,
-            text_mode="none", strict_text_fidelity=False,
-            hatch_mode="skip", import_mode="auto",
-            cleanup_level="conservative", arc_mode="polyline",
-            lineweight_mode="ignore", grouping_mode="single",
+            import_mode="raster",
+            import_text=False,
+            detect_arcs=False,
+            make_faces=False,
+            map_dashes=False,
+            hatch_mode="skip",
         )
 
     @classmethod
-    def general_vector(cls) -> "ImportConfig":
-        """General Vector — good for most PDFs."""
+    def hybrid(cls) -> "ImportConfig":
+        """Hybrid mode. Extract vectors where clean; raster where lossy."""
         return cls(
-            curve_step_mm=1.0, join_tol=0.2, detect_arcs=True,
-            map_dashes=False, make_faces=False, import_text=True,
-            text_mode="labels", strict_text_fidelity=False,
-            hatch_mode="skip", import_mode="auto",
-            cleanup_level="conservative", arc_mode="auto",
-            lineweight_mode="ignore", grouping_mode="per_page",
-        )
-
-    @classmethod
-    def technical_drawing(cls) -> "ImportConfig":
-        """Technical Drawing — engineering drawings."""
-        return cls(
-            curve_step_mm=0.5, join_tol=0.1, detect_arcs=True,
-            map_dashes=True, make_faces=True, import_text=True,
-            text_mode="geometry", strict_text_fidelity=True,
-            hatch_mode="group", import_mode="auto",
-            cleanup_level="balanced", arc_mode="auto",
-            lineweight_mode="preserve", grouping_mode="per_page",
-        )
-
-    @classmethod
-    def shop_drawing(cls) -> "ImportConfig":
-        """Shop Drawing — fabrication drawings (default)."""
-        return cls(
-            curve_step_mm=0.3, join_tol=0.1, detect_arcs=True,
-            map_dashes=True, make_faces=True, import_text=True,
-            text_mode="geometry", strict_text_fidelity=True,
-            hatch_mode="group", import_mode="auto",
-            cleanup_level="balanced", arc_mode="auto",
-            lineweight_mode="preserve", grouping_mode="per_page",
-            arc_fit_tol_mm=0.05,
-        )
-
-    @classmethod
-    def full(cls) -> "ImportConfig":
-        """Full / Shop Drawing preset — balanced quality."""
-        return cls.shop_drawing()
-
-    @classmethod
-    def max_fidelity(cls) -> "ImportConfig":
-        """Max Fidelity — highest accuracy, slower."""
-        return cls(
-            curve_step_mm=0.2, join_tol=0.05, detect_arcs=True,
-            map_dashes=True, make_faces=True, import_text=True,
-            text_mode="geometry", strict_text_fidelity=True,
-            hatch_mode="import", import_mode="auto",
-            cleanup_level="aggressive", arc_mode="rebuild",
-            lineweight_mode="preserve", grouping_mode="nested_page_layer",
+            import_mode="hybrid",
+            ignore_images=False,
+            raster_fallback=True,
         )

@@ -47,7 +47,7 @@ def convert(
     output_path:
         Destination path for the DXF file.
     config:
-        Import configuration.  Defaults to :meth:`ImportConfig.shop_drawing`.
+        Import configuration.  Defaults to :meth:`ImportConfig.auto` (BCS-ARCH-001).
     dxf_version:
         Target DXF version (``"R12"`` through ``"R2018"``).
     progress_callback:
@@ -59,7 +59,7 @@ def convert(
         Statistics: ``pages``, ``entities``, ``text_items``.
     """
     if config is None:
-        config = ImportConfig.shop_drawing()
+        config = ImportConfig.auto()
 
     def _log(msg: str) -> None:
         if progress_callback:

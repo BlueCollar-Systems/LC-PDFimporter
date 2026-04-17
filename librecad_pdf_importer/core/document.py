@@ -53,12 +53,15 @@ class ExtractedPage:
     page_data: PageData
     profile: object
     images: List[ImagePlacement] = field(default_factory=list)
+    resolved_mode: Optional[str] = None       # "vector" | "raster" | "hybrid"
+    resolved_reason: Optional[str] = None     # human-readable
 
 
 @dataclass
 class DocumentExtraction:
     pdf_path: str
     pages: List[ExtractedPage] = field(default_factory=list)
+    requested_mode: str = "auto"              # BCS-ARCH-001 user request
 
     @property
     def primitive_count(self) -> int:
@@ -73,6 +76,19 @@ class DocumentExtraction:
         return sum(len(p.images) for p in self.pages)
 
     def summary(self) -> dict:
+        per_page_auto = [
+            {
+                "page": p.page_data.page_number,
+                "resolved": p.resolved_mode or "vector",
+                "reason": p.resolved_reason or "",
+            }
+            for p in self.pages
+        ]
+        counts: dict[str, int] = {}
+        for entry in per_page_auto:
+            counts[entry["resolved"]] = counts.get(entry["resolved"], 0) + 1
+        parts = [f"{n} {k}" for k, n in sorted(counts.items())]
+        auto_summary = f"{len(self.pages)} pages: " + ", ".join(parts) if parts else f"{len(self.pages)} pages"
         return {
             "pdf_path": self.pdf_path,
             "pages": len(self.pages),
@@ -87,6 +103,11 @@ class DocumentExtraction:
                 }
                 for p in self.pages
             ],
+            "auto_mode": {
+                "requested": self.requested_mode,
+                "per_page": per_page_auto,
+                "summary": auto_summary,
+            },
         }
 
 
@@ -161,6 +182,8 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
         for page_number in pages:
             page = doc.load_page(page_number - 1)
             effective_mode = mode
+            resolved_reason = ""
+
             if mode == "auto":
                 drawings = page.get_drawings()
                 text_blocks = page.get_text("blocks") or []
@@ -171,12 +194,23 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
                     text_words_count=len(text_words),
                     page_area=_rect_area(page.rect),
                 )
-                if auto_decision["type"] in {"glyph_flood", "fill_art", "raster_candidate"}:
+                auto_type = auto_decision.get("type", "vectors")
+                if auto_type in {"glyph_flood", "fill_art", "raster_candidate"}:
                     effective_mode = "raster"
+                    resolved_reason = f"{auto_type}: {auto_decision.get('reason','')}"
+                else:
+                    effective_mode = "vector"
+                    resolved_reason = "Standard vector content"
+            elif mode == "vector":
+                resolved_reason = "User forced vector mode"
+            elif mode == "raster":
+                resolved_reason = "User forced raster mode"
+            elif mode == "hybrid":
+                resolved_reason = "User forced hybrid mode"
 
             page_data = extract_page(page, page_number, scale=opts.scale, flip_y=opts.flip_y)
 
-            include_vectors = effective_mode in {"auto", "vectors", "hybrid"}
+            include_vectors = effective_mode in {"vector", "hybrid"}
             if include_vectors:
                 if opts.min_segment_mm > 0:
                     _prune_micro_segments(page_data, opts.min_segment_mm)
@@ -195,8 +229,10 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
             if mode == "auto" and effective_mode != "raster" and opts.raster_fallback:
                 if _looks_like_text_cloud_page(len(page_data.primitives), len(page_data.text_items)):
                     effective_mode = "raster"
+                    resolved_reason = "Text-cloud page -- fallback to raster"
                 elif _looks_like_page_frame_only(page_data):
                     effective_mode = "raster"
+                    resolved_reason = "Page frame only -- fallback to raster"
                 if effective_mode == "raster":
                     page_data.primitives = []
                     page_data.text_items = []
@@ -208,25 +244,38 @@ def extract_document(pdf_path: str, options: Optional[ExtractionOptions] = None)
                     rendered = _render_page_raster(page, page_number, opts, image_dir)
                     if rendered is not None:
                         images.append(rendered)
-                elif effective_mode == "auto":
+                elif effective_mode == "vector":
                     images = _extract_images(doc, page, page_number, opts, image_dir)
                     if opts.raster_fallback and (not page_data.primitives or _looks_like_page_frame_only(page_data)) and not images:
                         rendered = _render_page_raster(page, page_number, opts, image_dir)
                         if rendered is not None:
                             images.append(rendered)
+                            effective_mode = "raster"
+                            resolved_reason = "Vector empty -- raster fallback"
 
-            extracted.append(ExtractedPage(page_data=page_data, profile=profile, images=images))
+            extracted.append(ExtractedPage(
+                page_data=page_data,
+                profile=profile,
+                images=images,
+                resolved_mode=effective_mode,
+                resolved_reason=resolved_reason,
+            ))
 
-    return DocumentExtraction(pdf_path=pdf_path, pages=extracted)
+    return DocumentExtraction(
+        pdf_path=pdf_path,
+        pages=extracted,
+        requested_mode=mode,
+    )
 
 
 def _normalize_import_mode(raw: str | None) -> str:
+    """Normalize a mode string to BCS-ARCH-001: auto | vector | raster | hybrid."""
     mode = (raw or "auto").strip().lower()
-    if mode in {"vectors", "vector", "vector_only", "vectors_only"}:
-        return "vectors"
-    if mode in {"raster", "raster_only", "image", "images"}:
+    if mode == "vector":
+        return "vector"
+    if mode == "raster":
         return "raster"
-    if mode in {"hybrid", "raster_vector", "raster+vectors", "raster_vectors"}:
+    if mode == "hybrid":
         return "hybrid"
     return "auto"
 

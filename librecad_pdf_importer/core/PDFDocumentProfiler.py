@@ -50,7 +50,12 @@ def profile(page_data: PageData) -> PageProfile:
     scores["vector_art"] = min(max(s, 0), 1.0)
 
     s = 0.90 if total_geom == 0 and total_text == 0 else 0.0
-    scores["raster_only"] = s
+    # Profile score category name -- distinct namespace from BCS-ARCH-001
+    # import modes. Renamed from the legacy "raster_only" label to avoid
+    # collision with the deleted preset name. Scored when the page has
+    # zero vectors and zero text, which strongly implies a scanned/
+    # rendered image.
+    scores["blank_or_image"] = s
 
     primary = max(scores, key=scores.get) if scores else "unknown"
     if max(scores.values(), default=0) < 0.25:
@@ -66,12 +71,16 @@ def profile(page_data: PageData) -> PageProfile:
 
 
 def suggest_mode(profile: PageProfile) -> str:
+    """Text-rendering suggestion hint (legacy; informational only).
+
+    Not used for BCS-ARCH-001 import_mode selection.
+    """
     t = profile.primary_type
     if t == "fabrication":
-        return "technical"
+        return "tech_drawing_hint"
     elif t == "architectural":
-        return "architectural"
-    elif t in ("vector_art", "raster_only"):
+        return "architectural_hint"
+    elif t in ("vector_art", "blank_or_image"):
         return "none"
     return "generic"
 

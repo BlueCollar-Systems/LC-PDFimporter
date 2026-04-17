@@ -55,7 +55,7 @@ class TestDxfPipeline(unittest.TestCase):
         doc.save(str(out_path))
 
     def test_pdf_to_dxf_export(self) -> None:
-        run = run_import(str(self.pdf_path), preset="technical", overrides={"pages": "1"})
+        run = run_import(str(self.pdf_path), mode="vector", overrides={"pages": "1"})
         export = export_to_dxf(run.extraction, str(self.dxf_path))
 
         self.assertTrue(Path(export.output_path).is_file())
@@ -70,11 +70,11 @@ class TestDxfPipeline(unittest.TestCase):
         self.assertTrue({"LINE", "LWPOLYLINE", "ARC", "CIRCLE"}.intersection(types))
 
     def test_default_page_selection_imports_all_pages(self) -> None:
-        run = run_import(str(self.pdf_path), preset="general")
+        run = run_import(str(self.pdf_path), mode="vector")
         self.assertEqual(len(run.extraction.pages), 2)
 
-    def test_raster_only_mode_outputs_image_entity(self) -> None:
-        run = run_import(str(self.pdf_path), preset="raster_only", overrides={"pages": "1"})
+    def test_raster_mode_outputs_image_entity(self) -> None:
+        run = run_import(str(self.pdf_path), mode="raster", overrides={"pages": "1"})
         export = export_to_dxf(
             run.extraction,
             str(self.dxf_path),
@@ -86,7 +86,7 @@ class TestDxfPipeline(unittest.TestCase):
         self.assertIn("IMAGE", types)
 
     def test_dxf_version_override(self) -> None:
-        run = run_import(str(self.pdf_path), preset="technical", overrides={"pages": "1"})
+        run = run_import(str(self.pdf_path), mode="vector", overrides={"pages": "1"})
         export = export_to_dxf(
             run.extraction,
             str(self.dxf_path),
@@ -97,7 +97,7 @@ class TestDxfPipeline(unittest.TestCase):
         self.assertEqual(dxf.dxfversion, "AC1009")
 
     def test_default_spread_stacks_pages_with_20_percent_gap(self) -> None:
-        run = run_import(str(self.pdf_path), preset="general")
+        run = run_import(str(self.pdf_path), mode="vector")
         page1 = run.extraction.pages[0].page_data
         page2 = run.extraction.pages[1].page_data
         page1_line = next(p for p in page1.primitives if p.type == "line" and len(p.points) == 2)
@@ -132,7 +132,7 @@ class TestDxfPipeline(unittest.TestCase):
 
     def test_multipage_no_geometry_overlap(self) -> None:
         """Verify geometry from page 1 and page 2 occupy non-overlapping Y bands."""
-        run = run_import(str(self.pdf_path), preset="general")
+        run = run_import(str(self.pdf_path), mode="vector")
         export = export_to_dxf(
             run.extraction,
             str(self.dxf_path),
@@ -180,7 +180,7 @@ class TestDxfPipeline(unittest.TestCase):
             )
 
     def test_export_sets_extents_and_modelspace_vport(self) -> None:
-        run = run_import(str(self.pdf_path), preset="general")
+        run = run_import(str(self.pdf_path), mode="vector")
         export = export_to_dxf(
             run.extraction,
             str(self.dxf_path),

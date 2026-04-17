@@ -23,16 +23,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-# Preset name -> ImportConfig class method name
-PRESET_MAP = {
-    "fast": "fast",
-    "general": "general_vector",
-    "technical": "technical_drawing",
-    "shop": "shop_drawing",
-    "full": "full",
-    "max": "max_fidelity",
-}
-
+# BCS-ARCH-001: four modes, one classmethod each. No preset map.
 DXF_VERSIONS = ("R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018")
 
 
@@ -52,9 +43,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--pages", default=None,
                    help="Comma-separated page numbers to convert (default: all)")
-    p.add_argument("--preset", default="shop",
-                   choices=list(PRESET_MAP.keys()),
-                   help="Import preset (default: shop)")
+    p.add_argument("--mode", default="auto",
+                   choices=["auto", "vector", "raster", "hybrid"],
+                   help="Import mode (BCS-ARCH-001, default: auto)")
     p.add_argument("--scale", type=float, default=1.0,
                    help="Scale factor (default: 1.0)")
     p.add_argument("--no-text", action="store_true",
@@ -116,16 +107,15 @@ def main(argv: list[str] | None = None) -> int:
         stem = os.path.splitext(args.input)[0]
         output = stem + ".dxf"
 
-    # Build ImportConfig from preset + overrides
+    # BCS-ARCH-001: direct mode -> classmethod dispatch.
     from pdfcadcore.import_config import ImportConfig
 
-    factory = getattr(ImportConfig, PRESET_MAP[args.preset])
+    factory = getattr(ImportConfig, args.mode)
     config: ImportConfig = factory()
     config.user_scale = args.scale
     config.verbose = args.verbose
     if args.no_text:
         config.import_text = False
-        config.text_mode = "none"
     if args.no_arcs:
         config.detect_arcs = False
     if args.pages:
@@ -138,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pdf2dxf {__version__} -- BlueCollar Systems")
         print(f"  Input:  {args.input}")
         print(f"  Output: {output}")
-        print(f"  Preset: {args.preset}")
+        print(f"  Mode:   {args.mode}")
         print(f"  DXF:    {args.dxf_version}")
         print()
 

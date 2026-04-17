@@ -19,12 +19,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Batch-convert PDF vectors to LibreCAD-ready DXF.")
     p.add_argument("input_dir", help="Directory containing PDF files")
     p.add_argument("output_dir", help="Directory to write DXF files")
-    p.add_argument("--preset", default="technical",
-                   choices=["fast", "general", "technical", "shop", "raster_vector", "raster_only", "max"],
-                   help="Import preset")
+    p.add_argument("--mode", default="auto",
+                   choices=["auto", "vector", "raster", "hybrid"],
+                   help="Import mode (BCS-ARCH-001)")
     p.add_argument("--pages", default="all", help="Page spec (default: all)")
-    p.add_argument("--mode", choices=["auto", "vectors", "raster", "hybrid"], default=None,
-                   help="Optional import mode override")
     p.add_argument("--dxf-version", default="R2018",
                    choices=["R12", "R2000", "R2004", "R2007", "R2010", "R2013", "R2018"],
                    help="Target DXF version")
@@ -57,10 +55,8 @@ def main() -> int:
         out_dxf = out_root / rel.with_suffix(".dxf")
         out_dxf.parent.mkdir(parents=True, exist_ok=True)
         overrides = {"pages": args.pages}
-        if args.mode:
-            overrides["import_mode"] = args.mode
         try:
-            run = run_import(str(pdf), preset=args.preset, overrides=overrides)
+            run = run_import(str(pdf), mode=args.mode, overrides=overrides)
             export = export_to_dxf(
                 run.extraction,
                 str(out_dxf),

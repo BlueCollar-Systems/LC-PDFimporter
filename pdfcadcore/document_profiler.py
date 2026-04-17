@@ -65,6 +65,12 @@ def profile(page_data: PageData) -> PageProfile:
 
 
 def suggest_mode(profile_result: PageProfile) -> str:
+    """Text-rendering suggestion hint (legacy; informational only).
+
+    Returns one of "technical" | "architectural" | "none" | "generic".
+    Host adapters may use this to pre-select a text_mode UI default.
+    NOT used for import_mode selection — see suggest_import_mode.
+    """
     t = profile_result.primary_type
     if t == "fabrication":
         return "technical"
@@ -73,3 +79,59 @@ def suggest_mode(profile_result: PageProfile) -> str:
     elif t in ("vector_art", "raster_only"):
         return "none"
     return "generic"
+
+
+# --------------------------------------------------------------------
+# BCS-ARCH-001 Auto-mode resolution.
+#
+# When ImportConfig.import_mode == "auto", the extractor calls this
+# helper per page to decide which strategy to use. The decision uses
+# the existing classify_page_content() heuristics; no new thresholds
+# are introduced here.
+# --------------------------------------------------------------------
+def suggest_import_mode(
+    classification: dict,
+    page_drawing_count: int,
+    page_text_count: int,
+    page_has_images: bool,
+    user_ignore_images: bool = False,
+) -> tuple:
+    """Resolve Auto mode to one of "vector" | "raster" | "hybrid".
+
+    Args:
+        classification: result dict from auto_mode.classify_page_content()
+            with key "type" in {"vectors", "glyph_flood", "fill_art",
+            "raster_candidate"}.
+        page_drawing_count: number of vector drawings on the page.
+        page_text_count: number of text items on the page.
+        page_has_images: True if page has embedded raster imagery.
+        user_ignore_images: True if the caller passed --ignore-images.
+
+    Returns:
+        (resolved_mode, reason_string) tuple.
+
+    BCS-ARCH-001 Rule 9: the reason string must be human-readable so
+    the host adapter can show the user what Auto chose and why.
+    """
+    ctype = classification.get("type", "") if isinstance(classification, dict) else ""
+
+    # No vector content and no text at all -> must be raster
+    if page_drawing_count == 0 and page_text_count == 0:
+        return ("raster", "No vector content on page -- rendered image")
+
+    if ctype == "vectors":
+        if page_has_images and not user_ignore_images:
+            return ("hybrid", "Vectors + embedded raster imagery")
+        return ("vector", "Standard vector content")
+
+    if ctype in ("glyph_flood", "fill_art"):
+        # Known-garbage vector content: would produce thousands of useless
+        # tiny primitives. Raster is the correct output.
+        detail = classification.get("reason", ctype) if isinstance(classification, dict) else ctype
+        return ("raster", f"{ctype}: {detail}")
+
+    if ctype == "raster_candidate":
+        return ("raster", "Raster-dominated page")
+
+    # Fallback: assume vector content
+    return ("vector", "Fallback (unclassified) -- defaulting to vector")
