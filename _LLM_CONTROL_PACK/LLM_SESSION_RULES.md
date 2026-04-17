@@ -8,9 +8,11 @@
 - Project: BlueCollar Systems PDF Vector Importers
 - Repos: 1BL-PDFimporter (Blender), 1FC-PDFimporter (FreeCAD),
          1LC-PDFimporter (LibreCAD), 1SU-PDFimporter (SketchUp)
-- Shared core: pdfcadcore (Python, embedded in BL/FC/LC repos)
+- Shared core: pdfcadcore (standalone at 1pdfcadcore, embedded in BL/FC/LC)
 - SketchUp: independent Ruby implementation, same logic
+- Test corpus: 1pdf-test-corpus
 - Standing project manual: LLM_INSTRUCTIONS.md (reference when needed)
+- Architecture authority: **BCS-ARCH-001.md** (NON-NEGOTIABLE, supersedes all prior preset/mode decisions)
 
 ## ABSOLUTE CONSTRAINTS — VIOLATION = IMMEDIATE REVERT
 
@@ -65,12 +67,23 @@
     DXF entity creation → fix in host adapter. Do not duplicate behavioral
     fixes across layers.
 
+13. **MODE SYSTEM IS LOCKED BY BCS-ARCH-001.** Only four modes exist:
+    Auto (default), Vector, Raster, Hybrid. Text rendering is a separate
+    orthogonal control (Labels / 3D Text / Glyphs / Geometry). DO NOT
+    reintroduce any of the deprecated preset names: fast, general,
+    technical, shop, raster_vector, raster_only, max. DO NOT propose
+    "fast mode," "draft mode," "preview mode," "quality tiers," or any
+    similar concept. Every mode targets indistinguishable-from-source
+    fidelity. If a contribution appears to violate this, reject it and
+    cite BCS-ARCH-001.
+
 ## THIS SESSION'S SCOPE
 
 - Target importer: ____________ (BL / FC / LC / SU)
 - Target file(s):  ____________
 - Specific issue:  ____________
 - Affected PDFs:   ____________
+- Target mode(s):  ____________ (Auto / Vector / Raster / Hybrid, or N/A)
 
 ## WHAT "DONE" LOOKS LIKE
 
@@ -80,6 +93,7 @@
 - No files outside the stated scope were modified
 - If pdfcadcore was changed, all 3 copies are identical
 - Root cause was fixed, not masked
+- No deprecated preset names were reintroduced (see BCS-ARCH-001)
 - A regression guardrail was added for this specific fix
 - Required session output was provided (see below)
 
@@ -94,3 +108,4 @@ After every completed fix, report all of the following:
 5. Regression checks run and results
 6. Remaining risk
 7. Regression guardrail added (if none, work is incomplete)
+8. BCS-ARCH-001 compliance confirmation (no deprecated names, no new "quality tier")
