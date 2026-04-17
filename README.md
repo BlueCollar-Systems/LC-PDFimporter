@@ -10,7 +10,7 @@ DraftSight, QCAD, and any DXF-compatible CAD software.
 - Extracts lines, polylines, arcs, circles, rectangles, and closed loops
 - Preserves stroke colors, line widths, and dash patterns
 - Imports text with font size and rotation
-- Supports text modes (`labels`, `geometry`, `none`) and strict-text fidelity
+- Text rendering always at maximum fidelity (no quality dials)
 - **4 Import Modes** (BCS-ARCH-001): Auto (default, picks strategy per page), Vector, Raster, Hybrid
 - **4 Text Rendering Options**: Labels, 3D Text, Glyphs, Geometry (orthogonal to mode; 3D Text falls back to Labels in DXF)
 - **Maximum fidelity by default** -- no quality tiers, no fast-mode compromises
