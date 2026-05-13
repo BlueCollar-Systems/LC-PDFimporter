@@ -11,7 +11,11 @@ try:
 except ImportError:
     import fitz  # Legacy fallback
 
-from librecad_pdf_importer.core.PDFPrimitiveExtractor import extract_page
+from librecad_pdf_importer.core.PDFPrimitiveExtractor import (
+    _merge_stacked_fractions,
+    extract_page,
+)
+from librecad_pdf_importer.core.PDFPrimitives import NormalizedText
 from librecad_pdf_importer.core.document import ExtractionOptions, extract_document
 from librecad_pdf_importer.exporters.dxf_exporter import DxfExportOptions, export_to_dxf
 from librecad_pdf_importer.importer import run_import
@@ -224,6 +228,27 @@ class TestDxfPipeline(unittest.TestCase):
         self.assertEqual(len(page_data.primitives), 1)
         self.assertTrue(page_data.primitives[0].closed)
         self.assertGreaterEqual(len(page_data.primitives[0].points), 5)
+
+    def test_stacked_fraction_text_is_merged(self) -> None:
+        def text_item(idx: int, text: str, y: float) -> NormalizedText:
+            return NormalizedText(
+                id=idx,
+                text=text,
+                normalized=text,
+                insertion=(12.0, y),
+                bbox=(10.0, y - 0.5, 14.0, y + 0.5),
+                font_size=2.0,
+                page_number=1,
+            )
+
+        merged = _merge_stacked_fractions([
+            text_item(1, "15", 12.0),
+            text_item(2, "/", 10.0),
+            text_item(3, "16", 8.5),
+        ])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].text, "15/16")
 
     def test_auto_mode_fill_art_prefers_raster(self) -> None:
         fill_pdf = self.tmp_path / "fill_art.pdf"

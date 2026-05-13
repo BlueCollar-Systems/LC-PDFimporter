@@ -313,7 +313,176 @@ def _extract_text(page, page_h, page_num, flip_y, scale) -> List[NormalizedText]
                     rotation=angle, font_name=font, color=text_color,
                     page_number=page_num, generic_tags=generic_tags
                 ))
+    items = _merge_stacked_fractions(items)
     return items
+
+
+_SLASH_RE = re.compile(r'^[/\u2044\u2215]$')
+_DIGITS_RE = re.compile(r'^\d{1,4}$')
+_VALID_DENOMS = (2, 4, 8, 16, 32, 64)
+_FRAC_X_OVERLAP_MM = 5.0
+_FRAC_Y_SPREAD_MM = 4.5
+
+
+def _split_concatenated_fraction(digits: str):
+    s = digits.strip()
+    if not s.isdigit() or len(s) < 2:
+        return None
+    for denom in sorted(_VALID_DENOMS, reverse=True):
+        denom_s = str(denom)
+        if len(s) <= len(denom_s) or not s.endswith(denom_s):
+            continue
+        numer_s = s[:-len(denom_s)]
+        if numer_s.isdigit() and 0 < int(numer_s) < denom:
+            return numer_s, denom_s
+    return None
+
+
+def _merge_stacked_fractions(items: List[NormalizedText]) -> List[NormalizedText]:
+    if len(items) < 2:
+        return items
+
+    by_page: dict[int, list[int]] = {}
+    for idx, item in enumerate(items):
+        by_page.setdefault(item.page_number, []).append(idx)
+
+    merged_indices: set[int] = set()
+    replacements: dict[int, NormalizedText] = {}
+
+    for page_num, indices in by_page.items():
+        slash_idxs = [i for i in indices if _SLASH_RE.match(items[i].text.strip())]
+        for slash_idx in slash_idxs:
+            if slash_idx in merged_indices:
+                continue
+            slash = items[slash_idx]
+            sx, sy = slash.insertion
+
+            concat_candidates = []
+            for candidate_idx in indices:
+                if candidate_idx == slash_idx or candidate_idx in merged_indices:
+                    continue
+                candidate = items[candidate_idx]
+                candidate_text = candidate.text.strip()
+                if not candidate_text.isdigit() or len(candidate_text) < 2:
+                    continue
+                cx, cy = candidate.insertion
+                if abs(cx - sx) > _FRAC_X_OVERLAP_MM or abs(cy - sy) > _FRAC_Y_SPREAD_MM:
+                    continue
+                split = _split_concatenated_fraction(candidate_text)
+                if split is not None:
+                    concat_candidates.append((candidate_idx, split))
+
+            if len(concat_candidates) == 1:
+                candidate_idx, (numer_s, denom_s) = concat_candidates[0]
+                candidate = items[candidate_idx]
+                sizes = [candidate.font_size, slash.font_size]
+                if max(sizes) <= 2.0 * min(sizes):
+                    merged_text = f"{numer_s}/{denom_s}"
+                    merged = NormalizedText(
+                        id=next_id(),
+                        text=merged_text,
+                        normalized=merged_text.upper().strip(),
+                        insertion=slash.insertion,
+                        bbox=_merged_bbox(candidate.bbox, slash.bbox),
+                        font_size=sum(sizes) / 2.0,
+                        rotation=slash.rotation,
+                        font_name=slash.font_name or candidate.font_name,
+                        color=slash.color or candidate.color,
+                        page_number=page_num,
+                        generic_tags=_classify_generic(merged_text),
+                    )
+                    merged_indices.update([candidate_idx, slash_idx])
+                    replacements[slash_idx] = merged
+                    continue
+
+            digit_candidates = []
+            for candidate_idx in indices:
+                if candidate_idx == slash_idx or candidate_idx in merged_indices:
+                    continue
+                candidate = items[candidate_idx]
+                candidate_text = candidate.text.strip()
+                if not _DIGITS_RE.match(candidate_text):
+                    continue
+                if len(candidate_text) >= 2 and _split_concatenated_fraction(candidate_text) is not None:
+                    continue
+                cx, cy = candidate.insertion
+                if abs(cx - sx) <= _FRAC_X_OVERLAP_MM and abs(cy - sy) <= _FRAC_Y_SPREAD_MM:
+                    digit_candidates.append(candidate_idx)
+
+            if len(digit_candidates) < 2:
+                continue
+
+            digit_candidates.sort(key=lambda i: abs(items[i].insertion[1] - sy))
+            best_pair = None
+            best_spread = _FRAC_Y_SPREAD_MM + 1.0
+            for left in range(len(digit_candidates)):
+                for right in range(left + 1, len(digit_candidates)):
+                    a_idx = digit_candidates[left]
+                    b_idx = digit_candidates[right]
+                    spread = abs(items[a_idx].insertion[1] - items[b_idx].insertion[1])
+                    if spread > _FRAC_Y_SPREAD_MM or spread < 0.3:
+                        continue
+                    a_val = int(items[a_idx].text.strip())
+                    b_val = int(items[b_idx].text.strip())
+                    if a_val < b_val:
+                        numer_idx, denom_idx = a_idx, b_idx
+                    elif b_val < a_val:
+                        numer_idx, denom_idx = b_idx, a_idx
+                    else:
+                        continue
+                    denom_val = int(items[denom_idx].text.strip())
+                    numer_val = int(items[numer_idx].text.strip())
+                    if denom_val not in _VALID_DENOMS or numer_val >= denom_val:
+                        continue
+                    if spread < best_spread:
+                        best_spread = spread
+                        best_pair = (numer_idx, denom_idx)
+
+            if best_pair is None:
+                continue
+
+            numer_idx, denom_idx = best_pair
+            numer = items[numer_idx]
+            denom = items[denom_idx]
+            sizes = [numer.font_size, slash.font_size, denom.font_size]
+            if max(sizes) <= 2.0 * min(sizes):
+                merged_text = f"{numer.text.strip()}/{denom.text.strip()}"
+                merged = NormalizedText(
+                    id=next_id(),
+                    text=merged_text,
+                    normalized=merged_text.upper().strip(),
+                    insertion=slash.insertion,
+                    bbox=_merged_bbox(numer.bbox, slash.bbox, denom.bbox),
+                    font_size=sum(sizes) / 3.0,
+                    rotation=slash.rotation,
+                    font_name=slash.font_name or numer.font_name,
+                    color=slash.color or numer.color,
+                    page_number=page_num,
+                    generic_tags=_classify_generic(merged_text),
+                )
+                merged_indices.update([numer_idx, slash_idx, denom_idx])
+                replacements[slash_idx] = merged
+
+    if not merged_indices:
+        return items
+
+    return [
+        replacements[idx] if idx in replacements else item
+        for idx, item in enumerate(items)
+        if idx not in merged_indices or idx in replacements
+    ]
+
+
+def _merged_bbox(*boxes):
+    vals = [box for box in boxes if box is not None]
+    if not vals:
+        return None
+    return (
+        min(box[0] for box in vals),
+        min(box[1] for box in vals),
+        max(box[2] for box in vals),
+        max(box[3] for box in vals),
+    )
 
 
 def _classify_generic(text: str) -> list:
