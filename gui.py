@@ -80,27 +80,32 @@ class Pdf2DxfApp(tk.Tk):
             text="BlueCollar Systems -- BUILT. NOT BOUGHT.",
             font=("Segoe UI", 9),
         ).grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=8)
+        ttk.Label(
+            frame,
+            text="Maximum fidelity in every import mode (Auto, Vector, Raster, Hybrid).",
+            font=("Segoe UI", 9),
+        ).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(0, 4))
 
         # ---- Input file ----
-        ttk.Label(frame, text="Input PDF:").grid(row=2, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="Input PDF:").grid(row=3, column=0, sticky=tk.W, **pad)
         self._var_input = tk.StringVar()
         self._ent_input = ttk.Entry(frame, textvariable=self._var_input, width=50)
-        self._ent_input.grid(row=2, column=1, sticky=tk.EW, **pad)
+        self._ent_input.grid(row=3, column=1, sticky=tk.EW, **pad)
         ttk.Button(frame, text="Browse...", command=self._browse_input).grid(
-            row=2, column=2, **pad,
-        )
-
-        # ---- Output file ----
-        ttk.Label(frame, text="Output DXF:").grid(row=3, column=0, sticky=tk.W, **pad)
-        self._var_output = tk.StringVar()
-        self._ent_output = ttk.Entry(frame, textvariable=self._var_output, width=50)
-        self._ent_output.grid(row=3, column=1, sticky=tk.EW, **pad)
-        ttk.Button(frame, text="Browse...", command=self._browse_output).grid(
             row=3, column=2, **pad,
         )
 
+        # ---- Output file ----
+        ttk.Label(frame, text="Output DXF:").grid(row=4, column=0, sticky=tk.W, **pad)
+        self._var_output = tk.StringVar()
+        self._ent_output = ttk.Entry(frame, textvariable=self._var_output, width=50)
+        self._ent_output.grid(row=4, column=1, sticky=tk.EW, **pad)
+        ttk.Button(frame, text="Browse...", command=self._browse_output).grid(
+            row=4, column=2, **pad,
+        )
+
         # ---- Mode (BCS-ARCH-001) ----
-        ttk.Label(frame, text="Mode:").grid(row=4, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="Mode:").grid(row=5, column=0, sticky=tk.W, **pad)
         self._var_mode = tk.StringVar(value="Auto")
         ttk.Combobox(
             frame,
@@ -108,27 +113,27 @@ class Pdf2DxfApp(tk.Tk):
             values=list(MODES.keys()),
             state="readonly",
             width=20,
-        ).grid(row=4, column=1, sticky=tk.W, **pad)
+        ).grid(row=5, column=1, sticky=tk.W, **pad)
 
         # ---- Page range ----
-        ttk.Label(frame, text="Pages:").grid(row=5, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="Pages:").grid(row=6, column=0, sticky=tk.W, **pad)
         self._var_pages = tk.StringVar()
         ttk.Entry(frame, textvariable=self._var_pages, width=20).grid(
-            row=5, column=1, sticky=tk.W, **pad,
+            row=6, column=1, sticky=tk.W, **pad,
         )
         ttk.Label(frame, text="(e.g. 1,2,5  or blank for all)").grid(
-            row=5, column=2, sticky=tk.W, **pad,
+            row=6, column=2, sticky=tk.W, **pad,
         )
 
         # ---- Scale ----
-        ttk.Label(frame, text="Scale:").grid(row=6, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="Scale:").grid(row=7, column=0, sticky=tk.W, **pad)
         self._var_scale = tk.StringVar(value="1.0")
         ttk.Entry(frame, textvariable=self._var_scale, width=10).grid(
-            row=6, column=1, sticky=tk.W, **pad,
+            row=7, column=1, sticky=tk.W, **pad,
         )
 
         # ---- Text mode (BCS-ARCH-001, orthogonal to import mode) ----
-        ttk.Label(frame, text="Text Mode:").grid(row=7, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="Text Mode:").grid(row=8, column=0, sticky=tk.W, **pad)
         self._var_text_mode = tk.StringVar(value="3D Text")
         ttk.Combobox(
             frame,
@@ -136,10 +141,10 @@ class Pdf2DxfApp(tk.Tk):
             values=list(TEXT_MODES.keys()),
             state="readonly",
             width=20,
-        ).grid(row=7, column=1, sticky=tk.W, **pad)
+        ).grid(row=8, column=1, sticky=tk.W, **pad)
 
         # ---- DXF version ----
-        ttk.Label(frame, text="DXF Version:").grid(row=8, column=0, sticky=tk.W, **pad)
+        ttk.Label(frame, text="DXF Version:").grid(row=9, column=0, sticky=tk.W, **pad)
         self._var_dxf_ver = tk.StringVar(value="R2010")
         ttk.Combobox(
             frame,
@@ -147,14 +152,14 @@ class Pdf2DxfApp(tk.Tk):
             values=list(DXF_VERSIONS),
             state="readonly",
             width=10,
-        ).grid(row=8, column=1, sticky=tk.W, **pad)
+        ).grid(row=9, column=1, sticky=tk.W, **pad)
 
         # ---- Option checkboxes ----
         # BCS-ARCH-001 Rule 5 sweep: only Import text and Open-in-LibreCAD
         # remain user-facing. Detect arcs / Map dash patterns / Make faces
         # were quality-tier dials and are now hardcoded True internally.
         opts_frame = ttk.LabelFrame(frame, text="Options", padding=6)
-        opts_frame.grid(row=9, column=0, columnspan=3, sticky=tk.EW, **pad)
+        opts_frame.grid(row=10, column=0, columnspan=3, sticky=tk.EW, **pad)
 
         self._var_import_text = tk.BooleanVar(value=True)
         self._var_launch_librecad = tk.BooleanVar(value=True)
@@ -168,21 +173,21 @@ class Pdf2DxfApp(tk.Tk):
         self._btn_convert = ttk.Button(
             frame, text="Convert", command=self._start_conversion,
         )
-        self._btn_convert.grid(row=10, column=0, columnspan=3, **pad)
+        self._btn_convert.grid(row=11, column=0, columnspan=3, **pad)
 
         # ---- Progress bar ----
         self._progress = ttk.Progressbar(frame, mode="indeterminate", length=400)
-        self._progress.grid(row=11, column=0, columnspan=3, sticky=tk.EW, **pad)
+        self._progress.grid(row=12, column=0, columnspan=3, sticky=tk.EW, **pad)
 
         # ---- Status log ----
-        ttk.Label(frame, text="Log:").grid(row=12, column=0, sticky=tk.NW, **pad)
+        ttk.Label(frame, text="Log:").grid(row=13, column=0, sticky=tk.NW, **pad)
         self._log_text = tk.Text(frame, height=10, width=70, state=tk.DISABLED,
                                  wrap=tk.WORD, font=("Consolas", 9))
-        self._log_text.grid(row=13, column=0, columnspan=3, sticky=tk.NSEW, **pad)
+        self._log_text.grid(row=14, column=0, columnspan=3, sticky=tk.NSEW, **pad)
 
         # Let the log area expand when the window is resized
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(13, weight=1)
+        frame.rowconfigure(14, weight=1)
 
     # ------------------------------------------------------------------
     # Browse dialogs
