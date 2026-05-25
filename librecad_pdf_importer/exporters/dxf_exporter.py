@@ -92,11 +92,12 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
         _track_xy(page_w, page_h + dy)
 
         for primitive in page.page_data.primitives:
-            layer = _layer_name(page.page_data.page_number, primitive.layer_name, primitive.stroke_color, opts)
-            _ensure_layer(doc, layer, primitive.stroke_color)
+            display_rgb = primitive.fill_color or primitive.stroke_color
+            layer = _layer_name(page.page_data.page_number, primitive.layer_name, display_rgb, opts)
+            _ensure_layer(doc, layer, display_rgb)
             attribs = {"layer": layer}
             if not is_r12:
-                _apply_color(attribs, primitive.stroke_color)
+                _apply_color(attribs, display_rgb)
                 _apply_lineweight(attribs, primitive.line_width)
 
             if opts.map_dashes:
@@ -222,6 +223,11 @@ def export_to_dxf(extraction: DocumentExtraction, output_path: str,
         center = ((float(min_x) + float(max_x)) * 0.5, (float(min_y) + float(max_y)) * 0.5)
         height = max(1.0, float(max_y) - float(min_y))
         doc.set_modelspace_vport(height * 1.1, center=center)
+        active = doc.viewports.get("*Active")
+        if active:
+            vp = active[0]
+            vp.dxf.center = center
+            vp.dxf.height = height * 1.1
 
     output = Path(output_path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
