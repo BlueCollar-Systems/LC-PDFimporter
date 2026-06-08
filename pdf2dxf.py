@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-__version__ = "1.0.13"
+__version__ = "1.0.14"
 
 # ---------------------------------------------------------------------------
 # Ensure project root is on sys.path so ``import pdfcadcore`` resolves
