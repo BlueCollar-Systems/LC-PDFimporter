@@ -41,6 +41,9 @@ jobs:
       - name: Install dependencies
         run: pip install "PyMuPDF>=1.24,<2.0" ezdxf pytest
 
+      - name: Verify pdfcadcore sync manifest
+        run: python pdfcadcore_sync_check.py --skip-cross-repo
+
       - name: Run pdfcadcore unit tests
         run: |
           cd pdfcadcore

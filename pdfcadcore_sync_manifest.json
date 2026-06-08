@@ -1,0 +1,19 @@
+{
+  "__init__.py": "25d2d2966732288bf074c60877fab47ede042d1895091335db9f9df56235f6ed",
+  "auto_mode.py": "71e038ce135bcea134e6e2e2df44aa46f4535211a7922528644ba85be4db79bf",
+  "dimension_parser.py": "a8a5b53d5a10a07b3fafe6683d832f7d0bfbbff74e11ba7d31b9fb3581066989",
+  "document_profiler.py": "1193ef9ef60543f45138f3ec2dba61d932f3fc4246d2ce73f0c35b5ed29e2ea1",
+  "fitz_loader.py": "3980ff2fcda6dcd8efcfe892d41f5e2dd8fb84a0a0cfdcc43b47fe254be35695",
+  "generic_classifier.py": "f200e369018d82bdebbadb77f9744d551cfb6bd32c2603f84b92d99cc9d2cc53",
+  "generic_recognizer.py": "74dfd567239824b3be3f447f4ae873308da36ffed4760847184df98041a3443d",
+  "geometry_cleanup.py": "9594311b190a8206092c0f84da3656e8572aae67671a0edc03be5bcee448937f",
+  "hatch_detector.py": "621e1649d35b423af716db14c222235aad2c6218eff64821e4e84927510a2bda",
+  "import_config.py": "89ef00d6b3fbae5faf91e02649d75845bea9d8b6bb7c3bd06a33c4a4037d8f9b",
+  "primitive_extractor.py": "86b4fe0a2cccb5f7c5374850eec3726d7659415eb5aca28330d0fb93f238c661",
+  "primitives.py": "ee4fc3bf85281dfd66d1d00a5a48864bb14d37aad0a3379082ba1ddded8849d5",
+  "qa_report.py": "8b671c8371ea70318fb6cac8a0e5ce299df9eff0bc07e01bccf3b9c024492014",
+  "recognition.py": "f0bb9961d71056d3dc60d8318405a3068b73a421f1996c5148be5579bc7fde27",
+  "regions.py": "7d34300ece54e9a3bf50ae54a76e34addc6b41299c6777929f8ccac4b3958f64",
+  "validation.py": "0510e4367e8fd4214e2ea3d42e933e60e8b33961eeb1ecda5125728e80fd7142",
+  "repo_context_builder_core.py": "8fe18c896c63372b5c2d7c17c383b548e9573c9b7592019cd72159f2b08505de"
+}
