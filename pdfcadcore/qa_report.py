@@ -24,10 +24,15 @@ def compute_counts_delta(
 class QAReport:
     """Cross-importer QA record for one run."""
 
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
     test_id: str = ""
     importer: str = ""
     platform: str = ""
+    host_name: str = ""
+    host_version: str = ""
+    runtime_version: str = ""
+    importer_version: str = ""
+    dxf_version: str = ""
     status: str = "unknown"
     message: str = ""
     input_pdf: str = ""
@@ -37,6 +42,8 @@ class QAReport:
     started_at: str = ""
     finished_at: str = ""
     runtime_seconds: float = 0.0
+    memory_peak_mb: float = 0.0
+    fallback_reason: str = ""
     counts_before: Dict[str, int] = field(default_factory=dict)
     counts_after: Dict[str, int] = field(default_factory=dict)
     counts_delta: Dict[str, int] = field(default_factory=dict)
@@ -62,10 +69,15 @@ class QAReport:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "QAReport":
         report = cls(
-            schema_version=str(data.get("schema_version", "1.0")),
+            schema_version=str(data.get("schema_version", "1.1")),
             test_id=str(data.get("test_id", "")),
             importer=str(data.get("importer", "")),
             platform=str(data.get("platform", "")),
+            host_name=str(data.get("host_name", "")),
+            host_version=str(data.get("host_version", "")),
+            runtime_version=str(data.get("runtime_version", "")),
+            importer_version=str(data.get("importer_version", "")),
+            dxf_version=str(data.get("dxf_version", "")),
             status=str(data.get("status", "unknown")),
             message=str(data.get("message", "")),
             input_pdf=str(data.get("input_pdf", "")),
@@ -75,6 +87,8 @@ class QAReport:
             started_at=str(data.get("started_at", "")),
             finished_at=str(data.get("finished_at", "")),
             runtime_seconds=float(data.get("runtime_seconds", 0.0) or 0.0),
+            memory_peak_mb=float(data.get("memory_peak_mb", 0.0) or 0.0),
+            fallback_reason=str(data.get("fallback_reason", "")),
             counts_before=dict(data.get("counts_before", {}) or {}),
             counts_after=dict(data.get("counts_after", {}) or {}),
             counts_delta=dict(data.get("counts_delta", {}) or {}),
