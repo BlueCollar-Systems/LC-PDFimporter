@@ -9,7 +9,7 @@ Modes are extraction **strategy** (Auto / Vector / Raster / Hybrid), not quality
 |----------|--------------------------|-------|---------|--------|
 | 2.2.x+ | 3.10+ | >=1.0 | >=1.24,<2.0 | ⚠️ Expected |
 | 2.1.x | 3.10+ | >=1.0 | >=1.24,<2.0 | ⚠️ Expected |
-| 2.0.x | 3.8+ | >=1.0 | >=1.24,<2.0 | ⚠️ Expected (legacy DXF readers) |
+| 2.0.x | 3.10+ (standalone CLI) | >=1.0 | >=1.24,<2.0 | ⚠️ Expected (DXF R2010 default; use `--dxf-version R12` for legacy readers) |
 | < 2.0 | | | | ❌ Not supported |
 
 Evidence levels:
@@ -29,4 +29,4 @@ Exported DXF (default R2010) is intended to open in AutoCAD 2010+, DraftSight, Q
 
 ## CI coverage
 
-GitHub Actions runs pytest on Python **3.10, 3.11, 3.12** (Ubuntu). Host application matrices are documented here; full LibreCAD GUI verification remains a manual release step.
+GitHub Actions runs pytest on Python **3.10, 3.11, 3.12** (Ubuntu), plus `pdfcadcore_sync_check.py`. Host application matrices are documented here; full LibreCAD GUI verification remains a manual release step.
