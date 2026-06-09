@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Verify vendored pdfcadcore and repo_context_builder_core.py stay in sync.
 
-FC/BL/LC embed copies of pdfcadcore. FC is canonical. BL intentionally diverges on
-``primitive_extractor.py`` (OCR dimension normalization). This script fails CI when any
-other file drifts from the canonical hash manifest.
+FC/BL/LC embed byte-identical copies of pdfcadcore. FC is canonical. This script
+fails CI when any core file drifts from the canonical hash manifest.
 """
 from __future__ import annotations
 
@@ -34,9 +33,9 @@ REPO_CONTEXT_BUILDER_PATHS: Tuple[Path, ...] = (
     Path(r"C:\1LC-PDFimporter") / "repo_context_builder_core.py",
 )
 
-KNOWN_DIVERGENCES: Dict[str, Tuple[str, ...]] = {
-    "BL": ("primitive_extractor.py",),
-}
+# No intentional divergences: all repos must match the canonical manifest exactly.
+# A real per-repo difference must be recorded with its own expected hash, never a blind skip.
+KNOWN_DIVERGENCES: Dict[str, Tuple[str, ...]] = {}
 
 
 def sha256_file(path: Path) -> str:

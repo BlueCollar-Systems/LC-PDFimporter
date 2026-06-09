@@ -21,6 +21,7 @@ from dataclasses import replace as _dc_replace
 
 from pdfcadcore.primitives import PageData, Primitive
 from pdfcadcore.import_config import ImportConfig
+from pdfcadcore.import_bounds import ImportBounds, compute_import_bounds
 
 from dxf_text_builder import build_text
 
@@ -310,39 +311,56 @@ def _apply_dxf_framing(
     stack_multiplier: float = 1.2,
 ) -> None:
     """Set $EXTMIN/$EXTMAX, limits, and modelspace VPORT for host auto-fit."""
-    min_x = float("inf")
-    min_y = float("inf")
-    max_x = float("-inf")
-    max_y = float("-inf")
-
-    def _track(x: float, y: float) -> None:
-        nonlocal min_x, min_y, max_x, max_y
-        min_x = min(min_x, float(x))
-        min_y = min(min_y, float(y))
-        max_x = max(max_x, float(x))
-        max_y = max(max_y, float(y))
-
+    merged: ImportBounds | None = None
     stack_y = 0.0
     for page in pages_data:
-        dy = stack_y
-        _track(0.0, dy)
-        _track(float(page.width), float(page.height) + dy)
-        for ti in page.text_items:
-            _track(ti.insertion[0], ti.insertion[1] + dy)
-            if ti.bbox:
-                x0, y0, x1, y1 = ti.bbox
-                _track(x0, y0 + dy)
-                _track(x1, y1 + dy)
+        page_bounds = compute_import_bounds(
+            page,
+            include_page_frame=True,
+            apply_padding=False,
+        )
+        if page_bounds is not None:
+            shifted = ImportBounds(
+                page_bounds.min_x,
+                page_bounds.min_y + stack_y,
+                page_bounds.max_x,
+                page_bounds.max_y + stack_y,
+            )
+            if merged is None:
+                merged = shifted
+            else:
+                merged = ImportBounds(
+                    min(merged.min_x, shifted.min_x),
+                    min(merged.min_y, shifted.min_y),
+                    max(merged.max_x, shifted.max_x),
+                    max(merged.max_y, shifted.max_y),
+                )
         stack_y -= float(page.height) * stack_multiplier
 
     msp = doc.modelspace()
     ext = ezdxf_bbox.extents(msp)
     if ext.has_data:
-        _track(ext.extmin.x, ext.extmin.y)
-        _track(ext.extmax.x, ext.extmax.y)
+        ext_bounds = ImportBounds(
+            float(ext.extmin.x),
+            float(ext.extmin.y),
+            float(ext.extmax.x),
+            float(ext.extmax.y),
+        )
+        if merged is None:
+            merged = ext_bounds
+        else:
+            merged = ImportBounds(
+                min(merged.min_x, ext_bounds.min_x),
+                min(merged.min_y, ext_bounds.min_y),
+                max(merged.max_x, ext_bounds.max_x),
+                max(merged.max_y, ext_bounds.max_y),
+            )
 
-    if min_x > max_x or min_y > max_y:
+    if merged is None:
         return
+
+    padded = merged.with_padding()
+    min_x, min_y, max_x, max_y = padded.as_tuple()
 
     extmin = (float(min_x), float(min_y), 0.0)
     extmax = (float(max_x), float(max_y), 0.0)
