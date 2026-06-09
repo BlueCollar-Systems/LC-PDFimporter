@@ -149,14 +149,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Copy canonical FC files into drifted BL/LC copies (local dev only).",
     )
     parser.add_argument(
+        "--write-manifest",
+        action="store_true",
+        help="Rewrite pdfcadcore_sync_manifest.json from canonical FC pdfcadcore.",
+    )
+    parser.add_argument(
         "--skip-cross-repo",
         action="store_true",
         help="Only validate the current repo against the manifest.",
     )
     args = parser.parse_args(argv)
 
-    manifest = load_manifest()
     canonical_dir = REPO_CORE_DIRS["FC"]
+    if args.write_manifest:
+        manifest: Dict[str, str] = {}
+        for path in iter_core_files(canonical_dir):
+            manifest[path.name] = sha256_file(path)
+        rcb = SCRIPT_DIR / "repo_context_builder_core.py"
+        if rcb.is_file():
+            manifest["repo_context_builder_core.py"] = sha256_file(rcb)
+        MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(f"Wrote manifest: {MANIFEST_PATH}")
+        for repo, core_dir in REPO_CORE_DIRS.items():
+            if repo == "FC":
+                continue
+            repo_root = core_dir.parents[1] if repo == "BL" else core_dir.parent
+            dest_manifest = repo_root / "pdfcadcore_sync_manifest.json"
+            if repo_root.is_dir():
+                dest_manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+                print(f"Copied manifest -> {dest_manifest}")
+        return 0
+
+    manifest = load_manifest()
     errors: List[str] = []
 
     local_repo = detect_local_repo()
